@@ -15,9 +15,18 @@ OPS_VERSION="1.0.0"
 
 # 项目根路径推导 (无论从何处执行或软链接调用均可准确解析)
 if [[ -z "${OPS_BASE_DIR:-}" ]]; then
-    _SRC_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    _SRC="${BASH_SOURCE[0]}"
+    while [[ -L "${_SRC}" ]]; do
+        _TARGET="$(readlink "${_SRC}")"
+        if [[ "${_TARGET}" == /* ]]; then
+            _SRC="${_TARGET}"
+        else
+            _SRC="$(dirname "${_SRC}")/${_TARGET}"
+        fi
+    done
+    _SRC_DIR="$(cd "$(dirname "${_SRC}")" && pwd)"
     OPS_BASE_DIR="$(cd "${_SRC_DIR}/.." && pwd)"
-    unset _SRC_DIR
+    unset _SRC _TARGET _SRC_DIR
 fi
 
 # 退出码定义

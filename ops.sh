@@ -4,9 +4,19 @@
 # 终端命令行路由、全屏 TUI 实时看板、单次健康体检、历史大图与配置中心
 # ==============================================================================
 
-# 项目根路径推导
-_OPS_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# 项目根路径推导 (解析多层软链接，准确定位源码真实物理路径)
+_SRC="${BASH_SOURCE[0]}"
+while [[ -L "${_SRC}" ]]; do
+    _TARGET="$(readlink "${_SRC}")"
+    if [[ "${_TARGET}" == /* ]]; then
+        _SRC="${_TARGET}"
+    else
+        _SRC="$(dirname "${_SRC}")/${_TARGET}"
+    fi
+done
+_OPS_ROOT="$(cd "$(dirname "${_SRC}")" && pwd)"
 export OPS_BASE_DIR="${_OPS_ROOT}"
+unset _SRC _TARGET
 
 # 加载全量核心库
 # shellcheck source=lib/common.sh
@@ -23,6 +33,8 @@ source "${_OPS_ROOT}/lib/webhook.sh"
 source "${_OPS_ROOT}/lib/alert.sh"
 # shellcheck source=lib/render.sh
 source "${_OPS_ROOT}/lib/render.sh"
+# shellcheck source=lib/node_mgr.sh
+source "${_OPS_ROOT}/lib/node_mgr.sh"
 unset _OPS_ROOT
 
 # ------------------------------------------------------------------------------
@@ -30,16 +42,34 @@ unset _OPS_ROOT
 # ------------------------------------------------------------------------------
 ops_print_help() {
     cat <<EOF
-${COLOR_BOLD}Ops-Monitor v${OPS_VERSION}${COLOR_RESET} - 轻量级服务器监控与自动化运维套件 (Zero-Dependency)
+${COLOR_BOLD}Ops-Monitor v${OPS_VERSION}${COLOR_RESET} - 轻量级服务器监控与多节点自动化运维套件 (Zero-Dependency)
 
 ${COLOR_BOLD}用法:${COLOR_RESET}
   ops [全局选项] <子命令> [参数...]
+  ops <节点名称>              [快捷方式] 直接打开远程已注册服务器的实时监控看板
 
-${COLOR_BOLD}监控与可视化:${COLOR_RESET}
-  ${COLOR_CYAN}ops${COLOR_RESET}, ${COLOR_CYAN}ops dashboard${COLOR_RESET}        [默认] 启动全屏 TUI 实时动态监控看板
+${COLOR_BOLD}本地监控与可视化:${COLOR_RESET}
+  ${COLOR_CYAN}ops${COLOR_RESET}, ${COLOR_CYAN}ops dashboard${COLOR_RESET}        [默认] 启动全屏 TUI 实时动态监控看板 (丝滑无闪烁)
   ${COLOR_CYAN}ops status${COLOR_RESET}                  输出紧凑的单次健康体检报告 (适合 MOTD / 远程探测)
   ${COLOR_CYAN}ops history <cpu|mem|disk|net>${COLOR_RESET}
                               以高精度 ASCII 坐标系绘制过去 24 小时的历史指标大图
+
+${COLOR_BOLD}多服务器集群与一键切换 (SSH 多节点):${COLOR_RESET}
+  ${COLOR_CYAN}ops switch${COLOR_RESET}, ${COLOR_CYAN}ops s${COLOR_RESET}             [推荐] 打开交互式服务器切换中心 (数字直达/一键换机)
+  ${COLOR_CYAN}ops use <节点名称|local>${COLOR_RESET}    切换当前默认工作上下文 (后续所有命令默认指向该机)
+  ${COLOR_CYAN}ops current${COLOR_RESET}                 查看当前默认工作服务器
+  ${COLOR_CYAN}ops update [--all | <名称>]${COLOR_RESET} 一键批量热升级所有/指定远程服务器上的 Ops-Monitor
+  ${COLOR_CYAN}ops node import-ssh${COLOR_RESET}         一键从 ~/.ssh/config 自动发现并批量导入所有主机
+  ${COLOR_CYAN}ops node add [名称] <目标/SSH命令>${COLOR_RESET}
+                              注册远程服务器 (支持: ops node add "ssh -i ~/key root@ip")
+  ${COLOR_CYAN}ops node list${COLOR_RESET}               列出所有已注册的远程服务器节点
+  ${COLOR_CYAN}ops node status <名称>${COLOR_RESET}      远程探测并输出指定服务器的健康体检卡片
+  ${COLOR_CYAN}ops node dashboard <名称>${COLOR_RESET}   通过 SSH 直接在终端打开远程服务器的实时监控看板
+  ${COLOR_CYAN}ops node connect <名称>${COLOR_RESET}, ${COLOR_CYAN}ops ssh <名称>${COLOR_RESET}
+                              一键 SSH 登录切换到指定远程服务器
+  ${COLOR_CYAN}ops node deploy <名称>${COLOR_RESET}      一键向远程服务器自动安装/部署 Ops-Monitor 套件
+  ${COLOR_CYAN}ops node uninstall <名称>${COLOR_RESET}   一键远程卸载指定服务器上的 Ops-Monitor 套件
+  ${COLOR_CYAN}ops node remove <名称>${COLOR_RESET}      删除已注册的远程节点
 
 ${COLOR_BOLD}配置管理中心:${COLOR_RESET}
   ${COLOR_CYAN}ops config${COLOR_RESET}                  进入交互式配置问答向导
@@ -74,29 +104,29 @@ ops_print_version() {
 ops_run_dashboard() {
     local refresh_interval
     refresh_interval=$(ops_config_get "COLLECT_INTERVAL" "2")
-    if [[ "${refresh_interval}" -gt 5 ]]; then
+    if [[ "${refresh_interval}" -gt 3 ]]; then
         # 仪表盘前台交互默认采用更流畅的 2 秒刷新
         refresh_interval=2
     fi
 
     # 优雅退出钩子：恢复光标与终端回显
     cleanup_tui() {
-        tput cnorm 2>/dev/null || true
+        printf "\033[?25h\033[0m\n"
         stty echo icanon 2>/dev/null || true
-        echo ""
     }
     trap cleanup_tui INT TERM EXIT
 
-    # 隐藏光标
-    tput civis 2>/dev/null || true
+    # 隐藏光标并初次清屏
+    stty -echo 2>/dev/null || true
+    printf "\033[?25l\033[2J\033[H"
 
     local host
     host=$(_ops_get_hostname)
 
     while true; do
-        # 1. 采集指标并落盘
+        # 1. 采集指标 (0.3s 快速差分，确保前台交互极度流畅)
         local raw_tsv
-        raw_tsv=$(ops_collect_metrics 1)
+        raw_tsv=$(ops_collect_metrics 0.3)
         ops_storage_append "${raw_tsv}"
 
         local ts cpu mem disk rx tx
@@ -129,8 +159,8 @@ ops_run_dashboard() {
         spark_cpu=$(ops_render_sparkline "${recent_cpus}" 0 100 1)
         spark_mem=$(ops_render_sparkline "${recent_mems}" 0 100 1)
 
-        # 4. 清屏并重绘
-        clear 2>/dev/null || printf "\033c"
+        # 4. 原位刷新 (光标移至 0,0，绝不调用 clear，完全消除黑屏闪烁)
+        printf "\033[H"
 
         cat <<EOF
 ${COLOR_BOLD}================================================================================${COLOR_RESET}
@@ -149,19 +179,28 @@ ${COLOR_BOLD}--- 网络实时吞吐 ---${COLOR_RESET}
   上行 (TX): ${COLOR_CYAN}${tx} KB/s${COLOR_RESET}
 
 ${COLOR_BOLD}================================================================================${COLOR_RESET}
-  ${COLOR_DIM}按 [q] 退出看板  |  按 [r] 强制刷新  |  按 [h] 查看帮助${COLOR_RESET}
+  ${COLOR_DIM}按 [q] 退出看板  |  按 [s] 切换服务器  |  按 [r] 强制刷新  |  按 [h] 查看帮助${COLOR_RESET}
 EOF
+        printf "\033[J"
 
-        # 5. 等待用户按键 (非阻塞指定超时)
+        # 5. 等待按键 (支持毫秒级响应)
         local key=""
         read -s -n 1 -t "${refresh_interval}" key 2>/dev/null || true
         if [[ "${key}" == "q" || "${key}" == "Q" ]]; then
             break
+        elif [[ "${key}" == "s" || "${key}" == "S" ]]; then
+            printf "\033[2J\033[H\033[?25h"
+            ops_node_switch
+            printf "\033[2J\033[H\033[?25l"
+            host=$(_ops_get_hostname)
+        elif [[ "${key}" == "r" || "${key}" == "R" ]]; then
+            continue
         elif [[ "${key}" == "h" || "${key}" == "H" ]]; then
-            clear
+            printf "\033[2J\033[H"
             ops_print_help
             echo ""
             read -r -p "按回车键返回看板..." _
+            printf "\033[2J\033[H"
         fi
     done
 }
@@ -363,15 +402,50 @@ main() {
 
     case "${subcommand}" in
         dashboard)
-            ops_run_dashboard "$@"
+            local active
+            active=$(ops_node_get_active)
+            if [[ "${active}" != "local" ]]; then
+                ops_node_dashboard "${active}"
+            else
+                ops_run_dashboard "$@"
+            fi
             ;;
         status)
-            ops_render_status_card
+            local active
+            active=$(ops_node_get_active)
+            if [[ "${active}" != "local" ]]; then
+                ops_node_status "${active}"
+            else
+                ops_render_status_card
+            fi
+            ;;
+        switch|select|s)
+            ops_node_switch
+            ;;
+        use)
+            ops_node_use "$@"
+            ;;
+        current|whoami)
+            ops_node_use
+            ;;
+        update|upgrade)
+            local update_target="${1:-}"
+            if [[ -z "${update_target}" || "${update_target}" == "--all" || "${update_target}" == "-a" ]]; then
+                ops_node_update_all "$@"
+            else
+                ops_node_deploy "${update_target}"
+            fi
             ;;
         history)
-            local metric_target="${1:-cpu}"
-            local date_target="${2:-today}"
-            ops_render_history_chart "${metric_target}" "${date_target}"
+            local active
+            active=$(ops_node_get_active)
+            if [[ "${active}" != "local" ]]; then
+                ops_node_history "${active}" "$@"
+            else
+                local metric_target="${1:-cpu}"
+                local date_target="${2:-today}"
+                ops_render_history_chart "${metric_target}" "${date_target}"
+            fi
             ;;
         config)
             local cfg_action="${1:-}"
@@ -444,9 +518,62 @@ main() {
         cron-run)
             ops_cron_step
             ;;
+        node|nodes)
+            local node_action="${1:-list}"
+            shift 2>/dev/null || true
+            case "${node_action}" in
+                add)
+                    ops_node_add "$@"
+                    ;;
+                list)
+                    ops_node_list
+                    ;;
+                switch|select)
+                    ops_node_switch
+                    ;;
+                use)
+                    ops_node_use "$@"
+                    ;;
+                import-ssh)
+                    ops_node_import_ssh
+                    ;;
+                remove|rm|del)
+                    ops_node_remove "$1"
+                    ;;
+                status)
+                    ops_node_status "$1"
+                    ;;
+                dashboard|top)
+                    ops_node_dashboard "$1"
+                    ;;
+                connect)
+                    ops_node_connect "$1"
+                    ;;
+                deploy|init)
+                    ops_node_deploy "$1"
+                    ;;
+                update|update-all|upgrade)
+                    ops_node_update_all "$@"
+                    ;;
+                uninstall|undeploy)
+                    ops_node_uninstall "$1" "${2:-}"
+                    ;;
+                *)
+                    echo "用法: ops node <add|list|switch|use|import-ssh|status|dashboard|connect|deploy|update-all|uninstall|remove> [参数]"
+                    ;;
+            esac
+            ;;
+        ssh)
+            ops_node_connect "$1"
+            ;;
         *)
-            ops_log_err "未知命令 '${subcommand}'，请执行 'ops --help' 查看用法"
-            exit "${OPS_EXIT_GENERAL}"
+            # 检查是否为已注册的远程节点名称 (例如: ops aws-prod -> 直接进入该远程节点仪表盘)
+            if _ops_node_find "${subcommand}" >/dev/null 2>&1; then
+                ops_node_dashboard "${subcommand}"
+            else
+                ops_log_err "未知命令 '${subcommand}'，请执行 'ops --help' 查看用法"
+                exit "${OPS_EXIT_GENERAL}"
+            fi
             ;;
     esac
 }
