@@ -1,0 +1,44 @@
+#!/bin/sh
+set -e
+
+case "$1" in
+    configure)
+        # 1. 创建运行时和状态目录
+        mkdir -p /var/log/ops-monitor/current /var/log/ops-monitor/state /etc/ops-monitor
+        chmod 755 /var/log/ops-monitor /var/log/ops-monitor/current /var/log/ops-monitor/state
+
+        # 2. 若配置文件不存在，则从出厂模版拷贝初始配置
+        if [ ! -f /etc/ops-monitor/ops.conf ]; then
+            if [ -f /opt/ops-monitor/config/ops.conf.default ]; then
+                cp /opt/ops-monitor/config/ops.conf.default /etc/ops-monitor/ops.conf
+            elif [ -f /opt/ops-monitor/config/ops.conf ]; then
+                cp /opt/ops-monitor/config/ops.conf /etc/ops-monitor/ops.conf
+            fi
+        fi
+        if [ -f /etc/ops-monitor/ops.conf ]; then
+            chmod 0600 /etc/ops-monitor/ops.conf
+        fi
+
+        # 3. 建立全局 CLI 软链接
+        mkdir -p /usr/local/bin
+        ln -sf /opt/ops-monitor/ops.sh /usr/local/bin/ops
+        chmod +x /opt/ops-monitor/ops.sh
+
+        # 4. 部署 SSH 登录感知探针
+        if [ -f /opt/ops-monitor/systemd/ops-prompt.sh ]; then
+            mkdir -p /etc/profile.d
+            cp -f /opt/ops-monitor/systemd/ops-prompt.sh /etc/profile.d/ops-prompt.sh
+            chmod 755 /etc/profile.d/ops-prompt.sh
+        fi
+
+        # 5. 注册并重启 Systemd 服务 (若系统支持 Systemd)
+        if [ -d /run/systemd/system ]; then
+            mkdir -p /etc/systemd/system
+            cp -f /opt/ops-monitor/systemd/ops-daemon.service /etc/systemd/system/ops-daemon.service
+            systemctl daemon-reload || true
+            systemctl enable ops-daemon.service || true
+            systemctl restart ops-daemon.service || true
+        fi
+        ;;
+esac
+exit 0

@@ -1,0 +1,334 @@
+#!/usr/bin/env bash
+# ==============================================================================
+# Ops-Monitor 多通道 Webhook 适配引擎 (lib/webhook.sh)
+# 支持 Slack, 钉钉 (HMAC-SHA256 加签), 飞书, 企业微信
+# 具备强网络超时控制与多通道并发/顺序广播
+# ==============================================================================
+
+_WEBHOOK_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=common.sh
+source "${_WEBHOOK_LIB_DIR}/common.sh"
+# shellcheck source=config_mgr.sh
+source "${_WEBHOOK_LIB_DIR}/config_mgr.sh"
+unset _WEBHOOK_LIB_DIR
+
+# 获取当前主机标识
+_ops_get_hostname() {
+    hostname -f 2>/dev/null || hostname 2>/dev/null || echo "Linux-Server"
+}
+
+# ------------------------------------------------------------------------------
+# 通用 HTTP POST 请求发送器 (带强超时约束)
+# ------------------------------------------------------------------------------
+_ops_http_post() {
+    local url="$1"
+    local json_data="$2"
+
+    if [[ -z "${url}" ]] || [[ -z "${json_data}" ]]; then
+        return "${OPS_EXIT_GENERAL}"
+    fi
+
+    local http_code
+    http_code=$(curl --connect-timeout 3 --max-time 5 -s -o /dev/null -w "%{http_code}" \
+        -H "Content-Type: application/json; charset=utf-8" \
+        -d "${json_data}" \
+        "${url}" 2>/dev/null || echo "000")
+
+    if [[ "${http_code}" =~ ^2[0-9]{2}$ ]]; then
+        return 0
+    else
+        ops_log_warn "Webhook 请求响应异常 (HTTP ${http_code}): ${url}"
+        return "${OPS_EXIT_NET_ERR}"
+    fi
+}
+
+# ------------------------------------------------------------------------------
+# 1. 钉钉 (DingTalk) 签名适配 (HMAC-SHA256)
+# ------------------------------------------------------------------------------
+ops_webhook_sign_dingtalk() {
+    local base_url="$1"
+    local secret="$2"
+
+    if [[ -z "${secret}" ]]; then
+        echo "${base_url}"
+        return 0
+    fi
+
+    local timestamp
+    timestamp=$(date +%s)000
+    local string_to_sign="${timestamp}\n${secret}"
+    
+    local sign
+    sign=$(echo -ne "${string_to_sign}" | openssl dgst -sha256 -hmac "${secret}" -binary 2>/dev/null | base64 | tr -d '\r\n')
+    
+    # 纯 Bash / awk 实现 URL 编码 (+, /, =)
+    local sign_enc
+    sign_enc=$(awk -v s="${sign}" 'BEGIN {
+        gsub(/\+/, "%2B", s);
+        gsub(/\//, "%2F", s);
+        gsub(/=/, "%3D", s);
+        print s;
+    }')
+
+    local separator="&"
+    if [[ "${base_url}" != *\?* ]]; then
+        separator="?"
+    fi
+
+    echo "${base_url}${separator}timestamp=${timestamp}&sign=${sign_enc}"
+}
+
+ops_webhook_send_dingtalk() {
+    local metric_name="$1"
+    local current_val="$2"
+    local threshold="$3"
+    local timestamp_str="${4:-$(date '+%Y-%m-%d %H:%M:%S')}"
+    local is_recovered="${5:-0}"
+
+    local url
+    url=$(ops_config_get "WEBHOOK_DINGTALK_URL" "")
+    local secret
+    secret=$(ops_config_get "WEBHOOK_DINGTALK_SECRET" "")
+    [[ -z "${url}" ]] && return 0
+
+    local final_url
+    final_url=$(ops_webhook_sign_dingtalk "${url}" "${secret}")
+    local host
+    host=$(_ops_get_hostname)
+
+    local title text
+    if [[ "${is_recovered}" == "1" ]]; then
+        title="✅ [Ops-Monitor 恢复] 指标恢复正常"
+        text="### ✅ [Ops-Monitor 恢复] 服务器指标恢复正常\n- **主机节点**: ${host}\n- **恢复指标**: ${metric_name}\n- **当前数值**: <font color=\"#34a853\">${current_val}%</font>\n- **告警阈值**: ${threshold}%\n- **恢复时间**: ${timestamp_str}\n"
+    else
+        title="🚨 [Ops-Monitor 告警] 资源使用率超限"
+        text="### 🚨 [Ops-Monitor 告警] 服务器资源超限\n- **主机节点**: ${host}\n- **触发指标**: ${metric_name}\n- **当前数值**: <font color=\"#d93025\">${current_val}%</font>\n- **告警阈值**: ${threshold}%\n- **告警时间**: ${timestamp_str}\n"
+    fi
+
+    local payload
+    payload=$(cat <<EOF
+{
+  "msgtype": "markdown",
+  "markdown": {
+    "title": "${title}",
+    "text": "${text}"
+  }
+}
+EOF
+)
+    _ops_http_post "${final_url}" "${payload}"
+}
+
+# ------------------------------------------------------------------------------
+# 2. Slack 适配 (Attachments / Block Kit)
+# ------------------------------------------------------------------------------
+ops_webhook_send_slack() {
+    local metric_name="$1"
+    local current_val="$2"
+    local threshold="$3"
+    local timestamp_str="${4:-$(date '+%Y-%m-%d %H:%M:%S')}"
+    local is_recovered="${5:-0}"
+
+    local url
+    url=$(ops_config_get "WEBHOOK_SLACK_URL" "")
+    [[ -z "${url}" ]] && return 0
+
+    local host
+    host=$(_ops_get_hostname)
+
+    local color title
+    if [[ "${is_recovered}" == "1" ]]; then
+        color="#2eb886"
+        title="✅ [Ops-Monitor 恢复] 指标恢复正常"
+    else
+        color="#e01e5a"
+        title="🚨 [Ops-Monitor 告警] 服务器资源超限"
+    fi
+
+    local payload
+    payload=$(cat <<EOF
+{
+  "attachments": [
+    {
+      "color": "${color}",
+      "title": "${title}",
+      "fields": [
+        {"title": "主机节点", "value": "${host}", "short": true},
+        {"title": "指标名称", "value": "${metric_name}", "short": true},
+        {"title": "当前数值", "value": "${current_val}%", "short": true},
+        {"title": "告警阈值", "value": "${threshold}%", "short": true},
+        {"title": "发生时间", "value": "${timestamp_str}", "short": false}
+      ],
+      "footer": "Ops-Monitor Zero-Dependency Agent"
+    }
+  ]
+}
+EOF
+)
+    _ops_http_post "${url}" "${payload}"
+}
+
+# ------------------------------------------------------------------------------
+# 3. 飞书 (Feishu) 适配 (Interactive Card)
+# ------------------------------------------------------------------------------
+ops_webhook_send_feishu() {
+    local metric_name="$1"
+    local current_val="$2"
+    local threshold="$3"
+    local timestamp_str="${4:-$(date '+%Y-%m-%d %H:%M:%S')}"
+    local is_recovered="${5:-0}"
+
+    local url
+    url=$(ops_config_get "WEBHOOK_FEISHU_URL" "")
+    [[ -z "${url}" ]] && return 0
+
+    local host
+    host=$(_ops_get_hostname)
+
+    local template title
+    if [[ "${is_recovered}" == "1" ]]; then
+        template="green"
+        title="✅ [Ops-Monitor 恢复] 指标恢复正常"
+    else
+        template="red"
+        title="🚨 [Ops-Monitor 告警] 服务器资源超限"
+    fi
+
+    local payload
+    payload=$(cat <<EOF
+{
+  "msg_type": "interactive",
+  "card": {
+    "header": {
+      "title": {"tag": "plain_text", "content": "${title}"},
+      "template": "${template}"
+    },
+    "elements": [
+      {
+        "tag": "div",
+        "text": {
+          "tag": "lark_md",
+          "content": "**主机节点**: ${host}\n**触发指标**: ${metric_name}\n**当前数值**: ${current_val}%\n**告警阈值**: ${threshold}%\n**发生时间**: ${timestamp_str}"
+        }
+      }
+    ]
+  }
+}
+EOF
+)
+    _ops_http_post "${url}" "${payload}"
+}
+
+# ------------------------------------------------------------------------------
+# 4. 企业微信 (WeCom) 适配 (Markdown)
+# ------------------------------------------------------------------------------
+ops_webhook_send_wecom() {
+    local metric_name="$1"
+    local current_val="$2"
+    local threshold="$3"
+    local timestamp_str="${4:-$(date '+%Y-%m-%d %H:%M:%S')}"
+    local is_recovered="${5:-0}"
+
+    local url
+    url=$(ops_config_get "WEBHOOK_WECOM_URL" "")
+    [[ -z "${url}" ]] && return 0
+
+    local host
+    host=$(_ops_get_hostname)
+
+    local content
+    if [[ "${is_recovered}" == "1" ]]; then
+        content="### ✅ <font color=\"info\">[Ops-Monitor 恢复]</font> 指标恢复正常\n> **主机节点**: ${host}\n> **恢复指标**: ${metric_name}\n> **当前数值**: <font color=\"info\">${current_val}%</font>\n> **告警阈值**: ${threshold}%\n> **恢复时间**: ${timestamp_str}"
+    else
+        content="### 🚨 <font color=\"warning\">[Ops-Monitor 告警]</font> 服务器资源超限\n> **主机节点**: ${host}\n> **触发指标**: ${metric_name}\n> **当前数值**: <font color=\"warning\">${current_val}%</font>\n> **告警阈值**: ${threshold}%\n> **告警时间**: ${timestamp_str}"
+    fi
+
+    local payload
+    payload=$(cat <<EOF
+{
+  "msgtype": "markdown",
+  "markdown": {
+    "content": "${content}"
+  }
+}
+EOF
+)
+    _ops_http_post "${url}" "${payload}"
+}
+
+# ------------------------------------------------------------------------------
+# 多通道联合广播
+# ------------------------------------------------------------------------------
+ops_webhook_broadcast() {
+    local metric_name="$1"
+    local current_val="$2"
+    local threshold="$3"
+    local timestamp_str="${4:-$(date '+%Y-%m-%d %H:%M:%S')}"
+    local is_recovered="${5:-0}"
+
+    ops_webhook_send_slack "$@" || true
+    ops_webhook_send_dingtalk "$@" || true
+    ops_webhook_send_feishu "$@" || true
+    ops_webhook_send_wecom "$@" || true
+    return 0
+}
+
+# ------------------------------------------------------------------------------
+# 连通性测试命令 (ops config test-alert)
+# ------------------------------------------------------------------------------
+ops_webhook_test_alert() {
+    local host
+    host=$(_ops_get_hostname)
+    local now
+    now=$(date '+%Y-%m-%d %H:%M:%S')
+    
+    local any_configured=0
+    local slack_url ding_url feishu_url wecom_url
+    slack_url=$(ops_config_get "WEBHOOK_SLACK_URL" "")
+    ding_url=$(ops_config_get "WEBHOOK_DINGTALK_URL" "")
+    feishu_url=$(ops_config_get "WEBHOOK_FEISHU_URL" "")
+    wecom_url=$(ops_config_get "WEBHOOK_WECOM_URL" "")
+
+    ops_log_info "正在向已配置的 Webhook 通道发送测试告警卡片..."
+
+    if [[ -n "${slack_url}" ]]; then
+        any_configured=1
+        if ops_webhook_send_slack "TEST_CPU" "99.9" "85.0" "${now}" 0; then
+            ops_log_info "  [Slack] 发送测试消息成功"
+        else
+            ops_log_err "  [Slack] 发送测试消息失败"
+        fi
+    fi
+
+    if [[ -n "${ding_url}" ]]; then
+        any_configured=1
+        if ops_webhook_send_dingtalk "TEST_CPU" "99.9" "85.0" "${now}" 0; then
+            ops_log_info "  [DingTalk] 发送测试消息成功"
+        else
+            ops_log_err "  [DingTalk] 发送测试消息失败"
+        fi
+    fi
+
+    if [[ -n "${feishu_url}" ]]; then
+        any_configured=1
+        if ops_webhook_send_feishu "TEST_CPU" "99.9" "85.0" "${now}" 0; then
+            ops_log_info "  [Feishu] 发送测试消息成功"
+        else
+            ops_log_err "  [Feishu] 发送测试消息失败"
+        fi
+    fi
+
+    if [[ -n "${wecom_url}" ]]; then
+        any_configured=1
+        if ops_webhook_send_wecom "TEST_CPU" "99.9" "85.0" "${now}" 0; then
+            ops_log_info "  [WeCom] 发送测试消息成功"
+        else
+            ops_log_err "  [WeCom] 发送测试消息失败"
+        fi
+    fi
+
+    if [[ "${any_configured}" -eq 0 ]]; then
+        ops_log_warn "未配置任何 Webhook URL (WEBHOOK_SLACK_URL, WEBHOOK_DINGTALK_URL, WEBHOOK_FEISHU_URL, WEBHOOK_WECOM_URL)"
+        return 0
+    fi
+}

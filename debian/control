@@ -1,0 +1,12 @@
+Package: ops-monitor
+Version: 1.0.0
+Section: admin
+Priority: optional
+Architecture: all
+Depends: bash (>= 4.0), coreutils, gawk | awk, sed, grep, curl, tar, gzip, openssl
+Maintainer: Ops-Monitor Engineering Team <ops-monitor@example.com>
+Description: Lightweight Zero-Dependency Linux Server Monitoring Suite
+ Ops-Monitor is a lightweight, zero-external-dependency server monitoring and
+ alerting suite built with native POSIX/Bash. It provides procfs-driven metrics
+ collection, ANSI/UTF-8 terminal charts, multi-channel webhook alerts, and
+ automated lifecycle data archiving with minimal resource overhead.

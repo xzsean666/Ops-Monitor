@@ -1,0 +1,9 @@
+# Ops-Monitor .gitignore
+data/current/*.tsv
+data/state/*.state
+*.lock
+dist/
+*.deb
+*.tar.gz
+tests/tmp/
+.coverage

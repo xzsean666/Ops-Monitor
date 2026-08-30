@@ -1,0 +1,25 @@
+#!/bin/sh
+set -e
+
+case "$1" in
+    remove)
+        rm -f /usr/local/bin/ops
+        rm -f /etc/profile.d/ops-prompt.sh
+        rm -f /etc/systemd/system/ops-daemon.service
+        if [ -d /run/systemd/system ]; then
+            systemctl daemon-reload || true
+        fi
+        ;;
+    purge)
+        rm -rf /etc/ops-monitor
+        rm -rf /var/log/ops-monitor
+        rm -rf /opt/ops-monitor
+        rm -f /usr/local/bin/ops
+        rm -f /etc/profile.d/ops-prompt.sh
+        rm -f /etc/systemd/system/ops-daemon.service
+        if [ -d /run/systemd/system ]; then
+            systemctl daemon-reload || true
+        fi
+        ;;
+esac
+exit 0

@@ -1,0 +1,17 @@
+[Unit]
+Description=Ops-Monitor Metrics Collection and Alerting Daemon
+Documentation=https://github.com/xzsean666/Ops-Monitor
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/opt/ops-monitor/ops.sh daemon-run
+Restart=always
+RestartSec=10s
+StandardOutput=null
+StandardError=journal
+LimitNOFILE=65535
+TimeoutStopSec=15
+
+[Install]
+WantedBy=multi-user.target
