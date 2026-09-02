@@ -37,6 +37,7 @@ TEST_FILES=(
     "test_webhook.sh"
     "test_alert.sh"
     "test_render.sh"
+    "test_docker.sh"
     "test_ops_cli.sh"
     "test_packaging.sh"
     "test_daemon_prompt.sh"

@@ -377,6 +377,66 @@ ops_node_alert() {
 }
 
 # ------------------------------------------------------------------------------
+# 6.2 远程查看目标节点 Docker 容器实时监控 (ops node docker <name> [args...])
+# ------------------------------------------------------------------------------
+ops_node_docker() {
+    local name="${1:-}"
+    shift 2>/dev/null || true
+
+    if [[ -z "${name}" ]]; then
+        name=$(ops_node_get_active)
+    fi
+
+    if [[ "${name}" == "local" ]]; then
+        ops_docker_cli "$@"
+        return 0
+    fi
+
+    local node_info
+    node_info=$(_ops_node_find "${name}") || {
+        ops_log_err "未找到节点 '${name}'"
+        return 1
+    }
+
+    local target opts
+    target="${node_info%%|*}"
+    opts="${node_info#*|}"
+
+    local is_live=0
+    for arg in "$@"; do
+        if [[ "${arg}" == "-w" || "${arg}" == "--live" || "${arg}" == "live" || "${arg}" == "watch" ]]; then
+            is_live=1
+            break
+        fi
+    done
+
+    local ssh_tty=""
+    [[ "${is_live}" -eq 1 ]] && ssh_tty="-t"
+
+    # shellcheck disable=SC2086
+    ssh ${ssh_tty} ${opts} "${target}" "
+        if command -v ops >/dev/null 2>&1; then
+            ops docker $*
+        elif command -v docker >/dev/null 2>&1 || (command -v sudo >/dev/null 2>&1 && sudo -n docker info >/dev/null 2>&1); then
+            echo '┌────────────────────────────────────────────────────────────────────────┐'
+            echo '│  [远程探测] 主机: \$(hostname) (Docker 实时资源快照)                   │'
+            echo '├────────────────────────────────────────────────────────────────────────┤'
+            if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
+                docker stats --no-stream
+            elif command -v sudo >/dev/null 2>&1 && sudo -n docker info >/dev/null 2>&1; then
+                sudo -n docker stats --no-stream
+            fi
+            echo '└────────────────────────────────────────────────────────────────────────┘'
+            echo '💡 提示: 执行 \"ops node deploy ${name}\" 可一键为该远程机器安装 Ops-Monitor'
+        else
+            echo '┌────────────────────────────────────────────────────────────────────────┐'
+            echo '│  [远程探测] 主机: \$(hostname) 未检测到 Docker 环境 (未安装 Docker)    │'
+            echo '└────────────────────────────────────────────────────────────────────────┘'
+        fi
+    "
+}
+
+# ------------------------------------------------------------------------------
 # 7. 打开远程节点全屏实时看板 (ops node dashboard <name>)
 # ------------------------------------------------------------------------------
 ops_node_dashboard() {

@@ -57,6 +57,14 @@ val_mem=$(bash "${BASE_DIR}/ops.sh" config get ALERT_MEM_THRESHOLD)
 [[ "${val_mem}" == "83" ]] || { echo "  [FAIL] ops alert mem 83 快捷设置失败"; exit 1; }
 echo "  [PASS] ops alert 快捷设置命令测试通过"
 
+# 3.3 ops docker / ops ps 实时容器监控测试
+docker_out=$(bash "${BASE_DIR}/ops.sh" docker)
+echo "${docker_out}" | grep -q "Ops-Monitor Docker 容器实时资源监控" || { echo "  [FAIL] ops docker 输出异常: ${docker_out}"; exit 1; }
+ps_out=$(bash "${BASE_DIR}/ops.sh" ps)
+echo "${ps_out}" | grep -q "Ops-Monitor Docker 容器实时资源监控" || { echo "  [FAIL] ops ps 输出异常: ${ps_out}"; exit 1; }
+echo "  [PASS] ops docker 与 ops ps 路由执行正常"
+
+
 # 4. ops history 历史大图测试
 history_out=$(bash "${BASE_DIR}/ops.sh" history cpu)
 echo "${history_out}" | grep -q "CPU 负载使用率历史" || { echo "  [FAIL] ops history cpu 输出异常: ${history_out}"; exit 1; }

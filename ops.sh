@@ -35,6 +35,8 @@ source "${_OPS_ROOT}/lib/alert.sh"
 source "${_OPS_ROOT}/lib/render.sh"
 # shellcheck source=lib/node_mgr.sh
 source "${_OPS_ROOT}/lib/node_mgr.sh"
+# shellcheck source=lib/docker.sh
+source "${_OPS_ROOT}/lib/docker.sh"
 unset _OPS_ROOT
 
 # ------------------------------------------------------------------------------
@@ -54,6 +56,11 @@ ${COLOR_BOLD}本地监控与可视化:${COLOR_RESET}
   ${COLOR_CYAN}ops history <cpu|mem|disk|net>${COLOR_RESET}
                               以高精度 ASCII 坐标系绘制过去 24 小时的历史指标大图
 
+${COLOR_BOLD}Docker 容器实时资源监控 (Docker Stats):${COLOR_RESET}
+  ${COLOR_CYAN}ops docker${COLOR_RESET}, ${COLOR_CYAN}ops ps${COLOR_RESET}            [推荐] 实时查看所有 Docker 容器的 CPU、内存、I/O 等资源占用快照
+  ${COLOR_CYAN}ops docker -w${COLOR_RESET}, ${COLOR_CYAN}ops docker --live${COLOR_RESET}
+                              启动动态实时刷新看板 (每 2 秒原位刷新，按 q 退出)
+
 ${COLOR_BOLD}告警中心与极简控制 (Alert Center):${COLOR_RESET}
   ${COLOR_CYAN}ops alert${COLOR_RESET}, ${COLOR_CYAN}ops alert status${COLOR_RESET}     [推荐] 一条命令查看所有指标阈值、实时数值、状态机与服务启停状态
   ${COLOR_CYAN}ops alert set <指标> <数值>${COLOR_RESET}    极简修改告警阈值 (支持: cpu, mem, disk, rx, tx, cooldown)
@@ -61,6 +68,7 @@ ${COLOR_BOLD}告警中心与极简控制 (Alert Center):${COLOR_RESET}
   ${COLOR_CYAN}ops alert <start|stop|restart>${COLOR_RESET}一键启动 / 停止 / 重启告警后台守护服务
   ${COLOR_CYAN}ops alert test${COLOR_RESET}                一键向已配置的 Webhook 发送一条模拟告警卡片
   ${COLOR_CYAN}ops alert webhook <类型> <URL>${COLOR_RESET} 一键配置钉钉/飞书/企业微信/Slack 通知推送渠道
+
 
 ${COLOR_BOLD}多服务器集群与一键切换 (SSH 多节点):${COLOR_RESET}
   ${COLOR_CYAN}ops switch${COLOR_RESET}, ${COLOR_CYAN}ops s${COLOR_RESET}             [推荐] 打开交互式服务器切换中心 (数字直达/一键换机)
@@ -445,6 +453,15 @@ main() {
                 ops_render_status_card
             fi
             ;;
+        docker|dockers|containers|ps)
+            local active
+            active=$(ops_node_get_active)
+            if [[ "${active}" != "local" ]]; then
+                ops_node_docker "${active}" "$@"
+            else
+                ops_docker_cli "$@"
+            fi
+            ;;
         alert|alerts)
             local active
             active=$(ops_node_get_active)
@@ -581,6 +598,9 @@ main() {
                 alert)
                     ops_node_alert "$@"
                     ;;
+                docker|ps|stats)
+                    ops_node_docker "$@"
+                    ;;
                 dashboard|top)
                     ops_node_dashboard "$1"
                     ;;
@@ -597,7 +617,7 @@ main() {
                     ops_node_uninstall "$1" "${2:-}"
                     ;;
                 *)
-                    echo "用法: ops node <add|list|switch|use|import-ssh|status|alert|dashboard|connect|deploy|update-all|uninstall|remove> [参数]"
+                    echo "用法: ops node <add|list|switch|use|import-ssh|status|docker|alert|dashboard|connect|deploy|update-all|uninstall|remove> [参数]"
                     ;;
             esac
             ;;

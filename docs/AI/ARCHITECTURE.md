@@ -77,6 +77,8 @@ Ops-Monitor 是一套基于原生 POSIX/Bash 构建的轻量级、无外部运�
 ├── lib/
 │   ├── collector.sh        # 指标采集核心（procfs 与 df 解析）
 │   ├── render.sh           # ANSI / UTF-8 字符图形渲染（Sparklines、Braille 点阵图）
+│   ├── docker.sh           # Docker 容器实时资源监控与 TUI 渲染引擎
+│   ├── node_mgr.sh         # 远程 SSH 多节点集群管理与一键切换中心
 │   ├── alert.sh            # 告警规则评估、连续触发计数器、冷却抑制
 │   ├── webhook.sh          # Webhook 适配器（DingTalk HMAC 加签、Slack Payload 封装）
 │   ├── storage.sh          # TSV 写入、24h 滚动淘汰与 Tar.Gz 归档流水线
@@ -246,6 +248,27 @@ Ops-Monitor 是一套基于原生 POSIX/Bash 构建的轻量级、无外部运�
    - 本地/离线：`sudo dpkg -i ops-monitor_1.0.0_all.deb` 或 `sudo apt install ./ops-monitor_1.0.0_all.deb`。
    - 远程在线仓库：支持发布至 GitHub Releases 或 APT Repo，执行 `apt update && apt upgrade ops-monitor` 即可实现一键无缝热升级。
 
+### 4.8 Docker 容器实时资源监控子系统 (`lib/docker.sh`)
+为了满足用户极简、快速、实时查看所有 Docker 容器资源占用的诉求，系统设计了非侵入式、零历史持久化负担的容器实时监控引擎：
+1. **环境嗅探与权限自适应探测**：
+   - 自动检测系统中 `docker` 命令可用性与 Socket (`/var/run/docker.sock`) 读写权限。
+   - 权限不足时自动尝试 `sudo -n docker` 降级读取；未安装或守护进程未启动时输出友好诊断指南，不抛出原生堆栈异常。
+2. **实时指标聚合与图表渲染**：
+   - 解析全量容器的 CPU 使用率、内存实际占用与限制、内存百分比、网络 I/O (RX/TX)、磁盘 Block I/O (R/W) 及 PIDs。
+   - 实时计算所有容器的 CPU 与内存总消耗，输出带颜色分阶指示块（`░`, `▂`, `▄`, `█`）的格式化表格。
+3. **双模交互设计**：
+   - **快照卡片模式 (`ops docker` / `ops ps`)**：一次性输出主机概况、容器运行/停止统计与明细卡片，适合终端即查。
+   - **动态实时看盘 (`ops docker -w` / `ops docker --live`)**：2 秒高频原位无闪烁刷新（`printf "\033[H"`），支持 `q` 退出与快捷键交互。
+4. **多节点透传支持**：
+   - 配合 `ops use <node>` 上下文，可跨 SSH 远程透明查询目标服务器的 Docker 容器资源状态。
+
+### 4.9 远程 SSH 多节点集群管理与一键切换中心 (`lib/node_mgr.sh`)
+系统支持去中心化的轻量级多服务器运维与一键切换：
+- **服务器注册表**：加密保存于 `~/.config/ops-monitor/nodes.conf` (0600 权限)。
+- **一键服务器切换中心 (`ops switch` / `ops s`)**：交互式数字直达切换当前机器，支持一键进入实时看板。
+- **全局上下文隔离 (`ops use <node>`)**：切换后所有命令（`ops`, `ops status`, `ops docker`, `ops alert`）自动作用于目标服务器。
+- **一键批量热更新 (`ops update --all`)**：一键并行/串行向所有已注册服务器推送最新 deb 安装包并完成无损升级。
+
 ---
 
 ## 5. 数据规范与配置契约
@@ -286,12 +309,49 @@ WEBHOOK_FEISHU_URL=""
 ```text
 用法: ops [选项] <子命令> [参数...]
 
-监控与可视化:
+本地监控与可视化:
   ops                     [默认] 启动全屏 TUI 实时性能看板 (支持 CPU/MEM 实时曲线)
   ops dashboard           同上
   ops history <cpu|mem|net>
                           以高精度 ASCII 坐标系绘制过去 24 小时的历史指标大图
   ops status              输出紧凑的单次健康体检报告 (适合 MOTD / 批量探测)
+
+Docker 容器实时监控 (Docker Stats):
+  ops docker, ops ps      [推荐] 实时查看所有 Docker 容器的 CPU、内存、I/O 等资源占用快照
+  ops docker -w, --live   启动动态实时刷新看板 (每 2 秒原位刷新，按 q 退出)
+
+告警中心与极简控制 (Alert Center):
+  ops alert, ops alert status
+                          一条命令查看所有指标阈值、实时数值、状态机与服务启停状态
+  ops alert set <指标> <数值>
+                          极简修改告警阈值 (支持: cpu, mem, disk, rx, tx, cooldown)
+  ops alert <start|stop|restart>
+                          一键启动 / 停止 / 重启告警后台守护服务
+  ops alert test          一键向已配置的 Webhook 发送一条模拟告警卡片
+  ops alert webhook <类型> <URL>
+                          一键配置钉钉/飞书/企业微信/Slack 通知推送渠道
+
+多服务器集群与一键切换 (SSH 多节点):
+  ops switch, ops s       打开交互式服务器切换中心 (数字直达/一键换机)
+  ops use <节点名称|local>
+                          切换当前默认工作上下文 (后续所有命令默认指向该机)
+  ops current             查看当前默认工作服务器
+  ops update [--all | <名称>]
+                          一键批量热升级所有/指定远程服务器上的 Ops-Monitor
+  ops node import-ssh     一键从 ~/.ssh/config 自动发现并批量导入所有主机
+  ops node add [名称] <目标/SSH命令>
+                          注册远程服务器 (支持完整 SSH 连接命令)
+  ops node list           列出所有已注册的远程服务器节点
+  ops node status <名称>  远程探测并输出指定服务器的健康体检卡片
+  ops node docker <名称>  远程查看指定服务器的 Docker 容器资源占用
+  ops node dashboard <名称>
+                          通过 SSH 直接在终端打开远程服务器的实时监控看板
+  ops node connect <名称>, ops ssh <名称>
+                          一键 SSH 登录切换到指定远程服务器
+  ops node deploy <名称>  一键向远程服务器自动安装/部署 Ops-Monitor 套件
+  ops node uninstall <名称>
+                          一键远程卸载指定服务器上的 Ops-Monitor 套件
+  ops node remove <名称>  删除已注册的远程节点
 
 配置管理 (服务端/本地复用):
   ops config              进入 TUI 交互式问答配置向导

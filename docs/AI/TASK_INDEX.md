@@ -34,7 +34,10 @@
              [TASK-011: 自动化测试套件与端到端验证] (依赖 001-010)
                    │
                    v
-             [TASK-012: 告警中心统一 CLI (ops alert) 与极简管理] (依赖 006, 008)
+              [TASK-012: 告警中心统一 CLI (ops alert) 与极简管理] (依赖 006, 008)
+                    │
+                    v
+              [TASK-013: Docker 容器实时资源监控 (ops docker)] (依赖 008, 007)
 ```
 
 ---
@@ -55,3 +58,6 @@
 | [TASK-010](tasks/TASK-010.md) | Debian/APT 打包与部署工具链 | 实现 `debian/` 维护结构、`build-deb.sh`、`install.sh`、`uninstall.sh` | `DONE` | TASK-008, TASK-009 |
 | [TASK-011](tasks/TASK-011.md) | 自动化测试与全链路验证 | 构建单元测试与 Mock procfs 测试集，验证安装、采集、渲染与升级闭环 | `DONE` | TASK-001 ~ TASK-010 |
 | [TASK-012](tasks/TASK-012.md) | 告警中心统一 CLI 与极简管理 | 统一 `ops alert` 综合状态卡片、快捷阈值设置、Webhook 配置与守护控制 | `DONE` | TASK-006, TASK-008 |
+| [TASK-013](tasks/TASK-013.md) | Docker 容器实时资源监控 | 实现 `lib/docker.sh` (ops docker 实时快照、Live 刷新、未安装优雅降级) | `DONE` | TASK-008, TASK-007 |
+
+
