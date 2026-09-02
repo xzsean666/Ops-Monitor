@@ -6,7 +6,7 @@
 # --- 采集与保留策略 ---
 COLLECT_INTERVAL=60                     # 采样周期 (秒)
 RETENTION_DAYS=1                        # 本地分钟级指标保留天数
-ARCHIVE_DIR="/var/log/ops_archive"      # 归档目录 (为空则不归档直接删除)
+# ARCHIVE_DIR="/var/log/ops_archive"      # 归档目录 (为空则不归档直接删除)
 
 # --- 告警阈值与防抖 ---
 ALERT_CPU_THRESHOLD=85                  # CPU 告警阈值 (%)

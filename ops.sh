@@ -54,6 +54,14 @@ ${COLOR_BOLD}本地监控与可视化:${COLOR_RESET}
   ${COLOR_CYAN}ops history <cpu|mem|disk|net>${COLOR_RESET}
                               以高精度 ASCII 坐标系绘制过去 24 小时的历史指标大图
 
+${COLOR_BOLD}告警中心与极简控制 (Alert Center):${COLOR_RESET}
+  ${COLOR_CYAN}ops alert${COLOR_RESET}, ${COLOR_CYAN}ops alert status${COLOR_RESET}     [推荐] 一条命令查看所有指标阈值、实时数值、状态机与服务启停状态
+  ${COLOR_CYAN}ops alert set <指标> <数值>${COLOR_RESET}    极简修改告警阈值 (支持: cpu, mem, disk, rx, tx, cooldown)
+                              例如: ops alert set cpu 90 (或快捷指令: ops alert cpu 90)
+  ${COLOR_CYAN}ops alert <start|stop|restart>${COLOR_RESET}一键启动 / 停止 / 重启告警后台守护服务
+  ${COLOR_CYAN}ops alert test${COLOR_RESET}                一键向已配置的 Webhook 发送一条模拟告警卡片
+  ${COLOR_CYAN}ops alert webhook <类型> <URL>${COLOR_RESET} 一键配置钉钉/飞书/企业微信/Slack 通知推送渠道
+
 ${COLOR_BOLD}多服务器集群与一键切换 (SSH 多节点):${COLOR_RESET}
   ${COLOR_CYAN}ops switch${COLOR_RESET}, ${COLOR_CYAN}ops s${COLOR_RESET}             [推荐] 打开交互式服务器切换中心 (数字直达/一键换机)
   ${COLOR_CYAN}ops use <节点名称|local>${COLOR_RESET}    切换当前默认工作上下文 (后续所有命令默认指向该机)
@@ -316,22 +324,32 @@ ops_manage_daemon() {
     if command -v systemctl >/dev/null 2>&1 && systemctl list-unit-files 2>/dev/null | grep -q "ops-daemon.service"; then
         case "${action}" in
             start)
+                systemctl enable ops-daemon.service >/dev/null 2>&1 || true
                 systemctl start ops-daemon.service
-                ops_log_info "ops-daemon.service 已启动"
+                ops_log_info "ops-daemon.service 已启动 (已设置开机自启)"
                 ;;
             stop)
                 systemctl stop ops-daemon.service
                 ops_log_info "ops-daemon.service 已停止"
                 ;;
             restart)
+                systemctl enable ops-daemon.service >/dev/null 2>&1 || true
                 systemctl restart ops-daemon.service
                 ops_log_info "ops-daemon.service 已重启"
+                ;;
+            enable)
+                systemctl enable ops-daemon.service >/dev/null 2>&1 || true
+                ops_log_info "ops-daemon.service 已开启开机自启"
+                ;;
+            disable)
+                systemctl disable --now ops-daemon.service >/dev/null 2>&1 || true
+                ops_log_info "ops-daemon.service 已停止并关闭开机自启"
                 ;;
             status)
                 systemctl status ops-daemon.service --no-pager
                 ;;
             *)
-                ops_log_err "未知守护进程动作: ${action} (支持: start, stop, restart, status)"
+                ops_log_err "未知守护进程动作: ${action} (支持: start, stop, restart, enable, disable, status)"
                 return 1
                 ;;
         esac
@@ -425,6 +443,15 @@ main() {
                 ops_node_status "${active}"
             else
                 ops_render_status_card
+            fi
+            ;;
+        alert|alerts)
+            local active
+            active=$(ops_node_get_active)
+            if [[ "${active}" != "local" ]]; then
+                ops_node_alert "${active}" "$@"
+            else
+                ops_alert_cli "$@"
             fi
             ;;
         switch|select|s)
@@ -551,6 +578,9 @@ main() {
                 status)
                     ops_node_status "$1"
                     ;;
+                alert)
+                    ops_node_alert "$@"
+                    ;;
                 dashboard|top)
                     ops_node_dashboard "$1"
                     ;;
@@ -567,7 +597,7 @@ main() {
                     ops_node_uninstall "$1" "${2:-}"
                     ;;
                 *)
-                    echo "用法: ops node <add|list|switch|use|import-ssh|status|dashboard|connect|deploy|update-all|uninstall|remove> [参数]"
+                    echo "用法: ops node <add|list|switch|use|import-ssh|status|alert|dashboard|connect|deploy|update-all|uninstall|remove> [参数]"
                     ;;
             esac
             ;;

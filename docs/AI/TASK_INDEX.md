@@ -31,7 +31,10 @@
             [TASK-010: Debian 打包与 APT/一键安装器] (依赖 008, 009)
                   │
                   v
-            [TASK-011: 自动化测试套件与端到端验证] (依赖 001-010)
+             [TASK-011: 自动化测试套件与端到端验证] (依赖 001-010)
+                   │
+                   v
+             [TASK-012: 告警中心统一 CLI (ops alert) 与极简管理] (依赖 006, 008)
 ```
 
 ---
@@ -51,3 +54,4 @@
 | [TASK-009](tasks/TASK-009.md) | 常驻守护进程与登录感知探针 | 实现 `ops-daemon.service`、Cron 降级调度及 `ops-prompt.sh` | `DONE` | TASK-003, TASK-008 |
 | [TASK-010](tasks/TASK-010.md) | Debian/APT 打包与部署工具链 | 实现 `debian/` 维护结构、`build-deb.sh`、`install.sh`、`uninstall.sh` | `DONE` | TASK-008, TASK-009 |
 | [TASK-011](tasks/TASK-011.md) | 自动化测试与全链路验证 | 构建单元测试与 Mock procfs 测试集，验证安装、采集、渲染与升级闭环 | `DONE` | TASK-001 ~ TASK-010 |
+| [TASK-012](tasks/TASK-012.md) | 告警中心统一 CLI 与极简管理 | 统一 `ops alert` 综合状态卡片、快捷阈值设置、Webhook 配置与守护控制 | `DONE` | TASK-006, TASK-008 |

@@ -99,4 +99,24 @@ ops_alert_evaluate_all "10.0" "20.0" "30.0" "60000" "1000" 5060
 [[ "${WEBHOOK_CALL_COUNT}" -eq 4 ]] || { echo "  [FAIL] 网络连续 2 次超限应触发 Webhook (当前次数: ${WEBHOOK_CALL_COUNT})"; exit 1; }
 echo "  [PASS] 网络入站流量超限告警触发测试通过"
 
+# 10. 测试 ops_alert_cli 统一管理与概览
+alert_out=$(ops_alert_cli show)
+[[ "${alert_out}" =~ "Ops-Monitor 告警中心与阈值状态" ]] || { echo "  [FAIL] ops_alert_cli 概览输出不匹配"; exit 1; }
+[[ "${alert_out}" =~ "CPU 使用率" ]] || { echo "  [FAIL] 概览应包含 CPU 指标"; exit 1; }
+echo "  [PASS] ops_alert_cli 概览卡片输出测试通过"
+
+# 11. 测试 ops_alert_cli set 设置与快捷语法
+ops_alert_cli set cpu 88 >/dev/null
+[[ "$(ops_config_get 'ALERT_CPU_THRESHOLD')" == "88" ]] || { echo "  [FAIL] ops alert set cpu 失败"; exit 1; }
+
+ops_alert_cli mem 79 >/dev/null
+[[ "$(ops_config_get 'ALERT_MEM_THRESHOLD')" == "79" ]] || { echo "  [FAIL] ops alert mem 快捷设置失败"; exit 1; }
+
+ops_alert_cli cooldown 25 >/dev/null
+[[ "$(ops_config_get 'ALERT_COOLDOWN_MINUTES')" == "25" ]] || { echo "  [FAIL] ops alert cooldown 快捷设置失败"; exit 1; }
+
+ops_alert_cli webhook dingtalk "https://oapi.dingtalk.com/robot/send?access_token=test" "SECRET123" >/dev/null
+[[ "$(ops_config_get 'WEBHOOK_DINGTALK_SECRET')" == "SECRET123" ]] || { echo "  [FAIL] ops alert webhook 钉钉加签设置失败"; exit 1; }
+echo "  [PASS] ops_alert_cli 阈值与 Webhook 极简设置测试通过"
+
 echo "=== [TEST] lib/alert.sh 所有测试通过! ==="

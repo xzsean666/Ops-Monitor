@@ -341,6 +341,42 @@ ops_node_status() {
 }
 
 # ------------------------------------------------------------------------------
+# 6.1 远程查看或管理目标节点告警中心 (ops node alert <name> [args...])
+# ------------------------------------------------------------------------------
+ops_node_alert() {
+    local name="${1:-}"
+    shift 2>/dev/null || true
+
+    if [[ -z "${name}" ]]; then
+        name=$(ops_node_get_active)
+    fi
+
+    if [[ "${name}" == "local" ]]; then
+        ops_alert_cli "$@"
+        return 0
+    fi
+
+    local node_info
+    node_info=$(_ops_node_find "${name}") || {
+        ops_log_err "未找到节点 '${name}'"
+        return 1
+    }
+
+    local target opts
+    target="${node_info%%|*}"
+    opts="${node_info#*|}"
+
+    # shellcheck disable=SC2086
+    ssh ${opts} "${target}" "
+        if command -v ops >/dev/null 2>&1; then
+            ops alert $*
+        else
+            echo '远程主机未安装 Ops-Monitor，请先执行 ops node deploy ${name}'
+        fi
+    "
+}
+
+# ------------------------------------------------------------------------------
 # 7. 打开远程节点全屏实时看板 (ops node dashboard <name>)
 # ------------------------------------------------------------------------------
 ops_node_dashboard() {

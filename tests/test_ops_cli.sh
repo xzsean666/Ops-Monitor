@@ -32,6 +32,7 @@ echo "${ver_out}" | grep -q "Ops-Monitor v1.0.0" || { echo "  [FAIL] -v 输出�
 echo "  [PASS] ops -v 版本号输出正常"
 
 # 3. ops status 单次体检测试
+export OPS_CONFIG_DIR="${TMP_DIR}/config"
 export OPS_CONFIG_FILE="${TMP_DIR}/config/ops.conf"
 export OPS_DATA_DIR="${TMP_DIR}/data"
 touch "${OPS_CONFIG_FILE}"
@@ -39,6 +40,22 @@ touch "${OPS_CONFIG_FILE}"
 status_out=$(bash "${BASE_DIR}/ops.sh" status)
 echo "${status_out}" | grep -q "Ops-Monitor 服务器健康体检报告" || { echo "  [FAIL] ops status 输出异常: ${status_out}"; exit 1; }
 echo "  [PASS] ops status 执行正常"
+
+# 3.1 ops alert 告警中心测试
+alert_out=$(bash "${BASE_DIR}/ops.sh" alert)
+echo "${alert_out}" | grep -q "Ops-Monitor 告警中心与阈值状态" || { echo "  [FAIL] ops alert 输出异常: ${alert_out}"; exit 1; }
+echo "${alert_out}" | grep -q "CPU 使用率" || { echo "  [FAIL] ops alert 应包含 CPU 使用率"; exit 1; }
+echo "  [PASS] ops alert 执行正常"
+
+# 3.2 ops alert 极简阈值设置测试
+bash "${BASE_DIR}/ops.sh" alert set cpu 92 >/dev/null
+val_cpu=$(bash "${BASE_DIR}/ops.sh" config get ALERT_CPU_THRESHOLD)
+[[ "${val_cpu}" == "92" ]] || { echo "  [FAIL] ops alert set cpu 92 校验失败"; exit 1; }
+
+bash "${BASE_DIR}/ops.sh" alert mem 83 >/dev/null
+val_mem=$(bash "${BASE_DIR}/ops.sh" config get ALERT_MEM_THRESHOLD)
+[[ "${val_mem}" == "83" ]] || { echo "  [FAIL] ops alert mem 83 快捷设置失败"; exit 1; }
+echo "  [PASS] ops alert 快捷设置命令测试通过"
 
 # 4. ops history 历史大图测试
 history_out=$(bash "${BASE_DIR}/ops.sh" history cpu)

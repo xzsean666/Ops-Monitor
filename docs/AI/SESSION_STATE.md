@@ -2,12 +2,19 @@
 
 ## 1. 当前基本信息
 - **当前 Goal**: 完成 Ops-Monitor 原生 POSIX/Bash 轻量级监控与运维套件全套核心代码、打包工具链与自动化测试套件交付。
-- **当前 Task**: 全量任务交付完成 (TASK-001 ~ TASK-011)
-- **当前状态**: `DONE` (全量 11 个任务全部交付并验证通过，测试通过率 100%)
+- **当前 Task**: 全量任务交付完成 (TASK-001 ~ TASK-012)
+- **当前状态**: `DONE` (全量 12 个任务全部交付并验证通过，测试通过率 100%)
 
 ---
 
 ## 2. 本次已完成内容
+1. **TASK-012: 告警中心统一 CLI (ops alert) 与极简管理**:
+   - 在 [lib/alert.sh](file:///home/sean/git/Ops-Monitor/lib/alert.sh) 中实现 `ops_alert_show_overview`（一条命令格式化输出守护进程运行状态、全局冷却、指标实时值与阈值、状态机状态及 Webhook 渠道配置）。
+   - 在 `lib/alert.sh` 中实现 `_ops_alert_set_metric` 与 `ops_alert_cli`，支持极简阈值设置命令 `ops alert set <指标> <数值>` 与快捷别名 `ops alert <cpu|mem|disk|rx|tx|cooldown> <数值>`。
+   - 支持 `ops alert <start|stop|restart>`、`ops alert test` 及 `ops alert webhook` 极简管理。
+   - 在 [lib/node_mgr.sh](file:///home/sean/git/Ops-Monitor/lib/node_mgr.sh) 中实现 `ops_node_alert` 远程代理。
+   - 在 [ops.sh](file:///home/sean/git/Ops-Monitor/ops.sh) 中注册 `alert` 顶层路由与帮助说明。
+   - 补充完善 [tests/test_alert.sh](file:///home/sean/git/Ops-Monitor/tests/test_alert.sh) 与 [tests/test_ops_cli.sh](file:///home/sean/git/Ops-Monitor/tests/test_ops_cli.sh)，11 个测试套件 100% PASS。
 1. **TASK-001: 项目骨架与公共基础库**:
    - 创建 `.gitignore`
    - 创建出厂标准配置模板 `config/ops.conf.default`
