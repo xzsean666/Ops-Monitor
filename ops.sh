@@ -212,10 +212,12 @@ ops_run_config_wizard() {
     echo -e "${COLOR_BOLD}=== Ops-Monitor 交互式配置向导 ===${COLOR_RESET}\n"
     ops_config_load
 
-    local cur_cpu cur_mem cur_disk cur_cooldown
+    local cur_cpu cur_mem cur_disk cur_net_rx cur_net_tx cur_cooldown
     cur_cpu=$(ops_config_get "ALERT_CPU_THRESHOLD" "85")
     cur_mem=$(ops_config_get "ALERT_MEM_THRESHOLD" "90")
     cur_disk=$(ops_config_get "ALERT_DISK_THRESHOLD" "85")
+    cur_net_rx=$(ops_config_get "ALERT_NET_RX_THRESHOLD_MB" "50")
+    cur_net_tx=$(ops_config_get "ALERT_NET_TX_THRESHOLD_MB" "50")
     cur_cooldown=$(ops_config_get "ALERT_COOLDOWN_MINUTES" "30")
 
     read -r -p "CPU 告警阈值 (%) [当前: ${cur_cpu}]: " in_cpu
@@ -226,6 +228,12 @@ ops_run_config_wizard() {
 
     read -r -p "磁盘 告警阈值 (%) [当前: ${cur_disk}]: " in_disk
     [[ -n "${in_disk}" ]] && ops_config_set "ALERT_DISK_THRESHOLD" "${in_disk}"
+
+    read -r -p "网络入站(RX) 告警阈值 (MB/s, 0关闭) [当前: ${cur_net_rx}]: " in_net_rx
+    [[ -n "${in_net_rx}" ]] && ops_config_set "ALERT_NET_RX_THRESHOLD_MB" "${in_net_rx}"
+
+    read -r -p "网络出站(TX) 告警阈值 (MB/s, 0关闭) [当前: ${cur_net_tx}]: " in_net_tx
+    [[ -n "${in_net_tx}" ]] && ops_config_set "ALERT_NET_TX_THRESHOLD_MB" "${in_net_tx}"
 
     read -r -p "告警冷却静默时间 (分钟) [当前: ${cur_cooldown}]: " in_cooldown
     [[ -n "${in_cooldown}" ]] && ops_config_set "ALERT_COOLDOWN_MINUTES" "${in_cooldown}"
@@ -274,7 +282,7 @@ ops_daemon_loop() {
             # 2. 告警规则比对与状态机推进
             local ts cpu mem disk rx tx
             IFS=$'\t' read -r ts cpu mem disk rx tx <<< "${raw_tsv}"
-            ops_alert_evaluate_all "${cpu}" "${mem}" "${disk}" "${ts}"
+            ops_alert_evaluate_all "${cpu}" "${mem}" "${disk}" "${rx}" "${tx}" "${ts}"
         fi
 
         # 3. 每日历史归档检查
@@ -294,7 +302,7 @@ ops_cron_step() {
 
         local ts cpu mem disk rx tx
         IFS=$'\t' read -r ts cpu mem disk rx tx <<< "${raw_tsv}"
-        ops_alert_evaluate_all "${cpu}" "${mem}" "${disk}" "${ts}"
+        ops_alert_evaluate_all "${cpu}" "${mem}" "${disk}" "${rx}" "${tx}" "${ts}"
     fi
     ops_storage_archive 0
 }

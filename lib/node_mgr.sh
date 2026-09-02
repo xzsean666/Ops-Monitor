@@ -430,7 +430,7 @@ ops_node_deploy() {
         # shellcheck disable=SC2086
         if cat "${local_deb}" | ssh ${opts} "${target}" "
             cat > /tmp/ops-monitor.deb &&
-            (sudo dpkg -i /tmp/ops-monitor.deb 2>/dev/null || sudo apt-get install -f -y /tmp/ops-monitor.deb) &&
+            (sudo dpkg -i --force-confold /tmp/ops-monitor.deb 2>/dev/null || sudo apt-get install -f -y /tmp/ops-monitor.deb) &&
             rm -f /tmp/ops-monitor.deb &&
             echo '安装成功！'
         "; then

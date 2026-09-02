@@ -12,9 +12,41 @@ source "${_WEBHOOK_LIB_DIR}/common.sh"
 source "${_WEBHOOK_LIB_DIR}/config_mgr.sh"
 unset _WEBHOOK_LIB_DIR
 
-# 获取当前主机标识
+# 获取当前主机标识与 IP
 _ops_get_hostname() {
     hostname -f 2>/dev/null || hostname 2>/dev/null || echo "Linux-Server"
+}
+
+_ops_get_host_ip() {
+    local cache_file="${OPS_STATE_DATA_DIR:-/tmp}/.ops_cached_ip"
+    if [[ -f "${cache_file}" ]]; then
+        local cache_mtime now_ts
+        cache_mtime=$(stat -c %Y "${cache_file}" 2>/dev/null || stat -f %m "${cache_file}" 2>/dev/null || echo 0)
+        now_ts=$(date +%s)
+        if (( now_ts - cache_mtime < 3600 )); then
+            cat "${cache_file}"
+            return 0
+        fi
+    fi
+
+    local private_ip public_ip final_ip
+    private_ip=$(ip route get 1.1.1.1 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i=="src") {print $(i+1); exit}}')
+    [[ -z "${private_ip}" ]] && private_ip=$(hostname -I 2>/dev/null | awk '{print $1}')
+    [[ -z "${private_ip}" ]] && private_ip="127.0.0.1"
+
+    public_ip=$(curl -fsSL --connect-timeout 1 --max-time 2 https://api.ipify.org 2>/dev/null || curl -fsSL --connect-timeout 1 --max-time 2 https://ifconfig.me/ip 2>/dev/null || true)
+    if [[ "${public_ip}" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+        if [[ "${public_ip}" != "${private_ip}" && -n "${private_ip}" && "${private_ip}" != "127.0.0.1" ]]; then
+            final_ip="${public_ip} (${private_ip})"
+        else
+            final_ip="${public_ip}"
+        fi
+    else
+        final_ip="${private_ip}"
+    fi
+
+    echo -n "${final_ip}" > "${cache_file}" 2>/dev/null || true
+    echo "${final_ip}"
 }
 
 # ------------------------------------------------------------------------------
@@ -84,6 +116,7 @@ ops_webhook_send_dingtalk() {
     local threshold="$3"
     local timestamp_str="${4:-$(date '+%Y-%m-%d %H:%M:%S')}"
     local is_recovered="${5:-0}"
+    local unit="${6:-%}"
 
     local url
     url=$(ops_config_get "WEBHOOK_DINGTALK_URL" "")
@@ -93,16 +126,30 @@ ops_webhook_send_dingtalk() {
 
     local final_url
     final_url=$(ops_webhook_sign_dingtalk "${url}" "${secret}")
-    local host
+    local host ip_addr
     host=$(_ops_get_hostname)
+    ip_addr=$(_ops_get_host_ip)
+
+    local metric_display="${metric_name}"
+    case "${metric_name}" in
+        CPU|TEST_CPU) metric_display="CPU 使用率" ;;
+        MEM) metric_display="内存 使用率" ;;
+        DISK) metric_display="磁盘 使用率" ;;
+        NET_RX) metric_display="网络入站流量 (RX)" ;;
+        NET_TX) metric_display="网络出站流量 (TX)" ;;
+    esac
+
+    if [[ "${metric_name}" == NET* && "${unit}" == "%" ]]; then
+        unit=" MB/s"
+    fi
 
     local title text
     if [[ "${is_recovered}" == "1" ]]; then
         title="✅ [Ops-Monitor 恢复] 指标恢复正常"
-        text="### ✅ [Ops-Monitor 恢复] 服务器指标恢复正常\n- **主机节点**: ${host}\n- **恢复指标**: ${metric_name}\n- **当前数值**: <font color=\"#34a853\">${current_val}%</font>\n- **告警阈值**: ${threshold}%\n- **恢复时间**: ${timestamp_str}\n"
+        text="### ✅ [Ops-Monitor 恢复] 服务器指标恢复正常\n- **主机节点**: ${host}\n- **IP 地址**: ${ip_addr}\n- **恢复指标**: ${metric_display}\n- **当前数值**: <font color=\"#34a853\">${current_val}${unit}</font>\n- **告警阈值**: ${threshold}${unit}\n- **恢复时间**: ${timestamp_str}\n"
     else
         title="🚨 [Ops-Monitor 告警] 资源使用率超限"
-        text="### 🚨 [Ops-Monitor 告警] 服务器资源超限\n- **主机节点**: ${host}\n- **触发指标**: ${metric_name}\n- **当前数值**: <font color=\"#d93025\">${current_val}%</font>\n- **告警阈值**: ${threshold}%\n- **告警时间**: ${timestamp_str}\n"
+        text="### 🚨 [Ops-Monitor 告警] 服务器资源超限\n- **主机节点**: ${host}\n- **IP 地址**: ${ip_addr}\n- **触发指标**: ${metric_display}\n- **当前数值**: <font color=\"#d93025\">${current_val}${unit}</font>\n- **告警阈值**: ${threshold}${unit}\n- **告警时间**: ${timestamp_str}\n"
     fi
 
     local payload
@@ -128,13 +175,28 @@ ops_webhook_send_slack() {
     local threshold="$3"
     local timestamp_str="${4:-$(date '+%Y-%m-%d %H:%M:%S')}"
     local is_recovered="${5:-0}"
+    local unit="${6:-%}"
 
     local url
     url=$(ops_config_get "WEBHOOK_SLACK_URL" "")
     [[ -z "${url}" ]] && return 0
 
-    local host
+    local host ip_addr
     host=$(_ops_get_hostname)
+    ip_addr=$(_ops_get_host_ip)
+
+    local metric_display="${metric_name}"
+    case "${metric_name}" in
+        CPU|TEST_CPU) metric_display="CPU 使用率" ;;
+        MEM) metric_display="内存 使用率" ;;
+        DISK) metric_display="磁盘 使用率" ;;
+        NET_RX) metric_display="网络入站流量 (RX)" ;;
+        NET_TX) metric_display="网络出站流量 (TX)" ;;
+    esac
+
+    if [[ "${metric_name}" == NET* && "${unit}" == "%" ]]; then
+        unit=" MB/s"
+    fi
 
     local color title
     if [[ "${is_recovered}" == "1" ]]; then
@@ -154,10 +216,11 @@ ops_webhook_send_slack() {
       "title": "${title}",
       "fields": [
         {"title": "主机节点", "value": "${host}", "short": true},
-        {"title": "指标名称", "value": "${metric_name}", "short": true},
-        {"title": "当前数值", "value": "${current_val}%", "short": true},
-        {"title": "告警阈值", "value": "${threshold}%", "short": true},
-        {"title": "发生时间", "value": "${timestamp_str}", "short": false}
+        {"title": "IP 地址", "value": "${ip_addr}", "short": true},
+        {"title": "指标名称", "value": "${metric_display}", "short": true},
+        {"title": "当前数值", "value": "${current_val}${unit}", "short": true},
+        {"title": "告警阈值", "value": "${threshold}${unit}", "short": true},
+        {"title": "发生时间", "value": "${timestamp_str}", "short": true}
       ],
       "footer": "Ops-Monitor Zero-Dependency Agent"
     }
@@ -177,13 +240,28 @@ ops_webhook_send_feishu() {
     local threshold="$3"
     local timestamp_str="${4:-$(date '+%Y-%m-%d %H:%M:%S')}"
     local is_recovered="${5:-0}"
+    local unit="${6:-%}"
 
     local url
     url=$(ops_config_get "WEBHOOK_FEISHU_URL" "")
     [[ -z "${url}" ]] && return 0
 
-    local host
+    local host ip_addr
     host=$(_ops_get_hostname)
+    ip_addr=$(_ops_get_host_ip)
+
+    local metric_display="${metric_name}"
+    case "${metric_name}" in
+        CPU|TEST_CPU) metric_display="CPU 使用率" ;;
+        MEM) metric_display="内存 使用率" ;;
+        DISK) metric_display="磁盘 使用率" ;;
+        NET_RX) metric_display="网络入站流量 (RX)" ;;
+        NET_TX) metric_display="网络出站流量 (TX)" ;;
+    esac
+
+    if [[ "${metric_name}" == NET* && "${unit}" == "%" ]]; then
+        unit=" MB/s"
+    fi
 
     local template title
     if [[ "${is_recovered}" == "1" ]]; then
@@ -208,7 +286,7 @@ ops_webhook_send_feishu() {
         "tag": "div",
         "text": {
           "tag": "lark_md",
-          "content": "**主机节点**: ${host}\n**触发指标**: ${metric_name}\n**当前数值**: ${current_val}%\n**告警阈值**: ${threshold}%\n**发生时间**: ${timestamp_str}"
+          "content": "**主机节点**: ${host}\n**IP 地址**: ${ip_addr}\n**触发指标**: ${metric_display}\n**当前数值**: ${current_val}${unit}\n**告警阈值**: ${threshold}${unit}\n**发生时间**: ${timestamp_str}"
         }
       }
     ]
@@ -228,19 +306,34 @@ ops_webhook_send_wecom() {
     local threshold="$3"
     local timestamp_str="${4:-$(date '+%Y-%m-%d %H:%M:%S')}"
     local is_recovered="${5:-0}"
+    local unit="${6:-%}"
 
     local url
     url=$(ops_config_get "WEBHOOK_WECOM_URL" "")
     [[ -z "${url}" ]] && return 0
 
-    local host
+    local host ip_addr
     host=$(_ops_get_hostname)
+    ip_addr=$(_ops_get_host_ip)
+
+    local metric_display="${metric_name}"
+    case "${metric_name}" in
+        CPU|TEST_CPU) metric_display="CPU 使用率" ;;
+        MEM) metric_display="内存 使用率" ;;
+        DISK) metric_display="磁盘 使用率" ;;
+        NET_RX) metric_display="网络入站流量 (RX)" ;;
+        NET_TX) metric_display="网络出站流量 (TX)" ;;
+    esac
+
+    if [[ "${metric_name}" == NET* && "${unit}" == "%" ]]; then
+        unit=" MB/s"
+    fi
 
     local content
     if [[ "${is_recovered}" == "1" ]]; then
-        content="### ✅ <font color=\"info\">[Ops-Monitor 恢复]</font> 指标恢复正常\n> **主机节点**: ${host}\n> **恢复指标**: ${metric_name}\n> **当前数值**: <font color=\"info\">${current_val}%</font>\n> **告警阈值**: ${threshold}%\n> **恢复时间**: ${timestamp_str}"
+        content="### ✅ <font color=\"info\">[Ops-Monitor 恢复]</font> 指标恢复正常\n> **主机节点**: ${host}\n> **IP 地址**: ${ip_addr}\n> **恢复指标**: ${metric_display}\n> **当前数值**: <font color=\"info\">${current_val}${unit}</font>\n> **告警阈值**: ${threshold}${unit}\n> **恢复时间**: ${timestamp_str}"
     else
-        content="### 🚨 <font color=\"warning\">[Ops-Monitor 告警]</font> 服务器资源超限\n> **主机节点**: ${host}\n> **触发指标**: ${metric_name}\n> **当前数值**: <font color=\"warning\">${current_val}%</font>\n> **告警阈值**: ${threshold}%\n> **告警时间**: ${timestamp_str}"
+        content="### 🚨 <font color=\"warning\">[Ops-Monitor 告警]</font> 服务器资源超限\n> **主机节点**: ${host}\n> **IP 地址**: ${ip_addr}\n> **触发指标**: ${metric_display}\n> **当前数值**: <font color=\"warning\">${current_val}${unit}</font>\n> **告警阈值**: ${threshold}${unit}\n> **告警时间**: ${timestamp_str}"
     fi
 
     local payload

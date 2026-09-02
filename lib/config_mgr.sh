@@ -24,6 +24,9 @@ OPS_VALID_CONFIG_KEYS=(
     "ALERT_CPU_CONSECUTIVE"
     "ALERT_MEM_THRESHOLD"
     "ALERT_DISK_THRESHOLD"
+    "ALERT_NET_RX_THRESHOLD_MB"
+    "ALERT_NET_TX_THRESHOLD_MB"
+    "ALERT_NET_CONSECUTIVE"
     "ALERT_COOLDOWN_MINUTES"
     "WEBHOOK_SLACK_URL"
     "WEBHOOK_DINGTALK_URL"
@@ -87,6 +90,18 @@ ops_config_validate_val() {
         ALERT_CPU_CONSECUTIVE)
             if ! [[ "${val}" =~ ^[0-9]+$ ]] || [[ "${val}" -lt 1 ]]; then
                 ops_log_err "ALERT_CPU_CONSECUTIVE 必须为大于等于 1 的整数 (当前: '${val}')"
+                return 1
+            fi
+            ;;
+        ALERT_NET_RX_THRESHOLD_MB|ALERT_NET_TX_THRESHOLD_MB)
+            if ! [[ "${val}" =~ ^[0-9]+$ ]] || [[ "${val}" -lt 0 ]]; then
+                ops_log_err "${key} 必须为大于等于 0 的整数 (单位 MB/s，0 为关闭告警，当前: '${val}')"
+                return 1
+            fi
+            ;;
+        ALERT_NET_CONSECUTIVE)
+            if ! [[ "${val}" =~ ^[0-9]+$ ]] || [[ "${val}" -lt 1 ]]; then
+                ops_log_err "ALERT_NET_CONSECUTIVE 必须为大于等于 1 的整数 (当前: '${val}')"
                 return 1
             fi
             ;;

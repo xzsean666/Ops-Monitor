@@ -13,6 +13,9 @@ ALERT_CPU_THRESHOLD=85                  # CPU 告警阈值 (%)
 ALERT_CPU_CONSECUTIVE=3                 # CPU 连续超限触发次数 (防抖)
 ALERT_MEM_THRESHOLD=90                  # 内存告警阈值 (%)
 ALERT_DISK_THRESHOLD=85                 # 磁盘主分区告警阈值 (%)
+ALERT_NET_RX_THRESHOLD_MB=50            # 网络入站/下载告警阈值 (MB/s, 0 为关闭)
+ALERT_NET_TX_THRESHOLD_MB=50            # 网络出站/上传告警阈值 (MB/s, 0 为关闭)
+ALERT_NET_CONSECUTIVE=3                 # 网络流量连续超限触发次数 (防抖)
 ALERT_COOLDOWN_MINUTES=30               # 告警抑制冷却周期 (分钟)
 
 # --- Webhook 通信渠道 ---

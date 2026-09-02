@@ -89,4 +89,14 @@ status_final=$(ops_alert_get_overall_status)
 [[ "${status_final}" == "NORMAL" ]] || { echo "  [FAIL] 恢复后状态应为 NORMAL"; exit 1; }
 echo "  [PASS] 指标恢复正常并成功发送恢复通知 (状态: NORMAL)"
 
+# 9. 网络流量超限告警测试 (NET_RX 阈值 50 MB/s, 连续 2 次)
+OPS_CONF["ALERT_NET_RX_THRESHOLD_MB"]="50"
+OPS_CONF["ALERT_NET_CONSECUTIVE"]="2"
+# 60000 KB/s ≈ 58.59 MB/s > 50 MB/s
+ops_alert_evaluate_all "10.0" "20.0" "30.0" "60000" "1000" 5000
+[[ "${WEBHOOK_CALL_COUNT}" -eq 3 ]] || { echo "  [FAIL] 网络首次超限不应触发"; exit 1; }
+ops_alert_evaluate_all "10.0" "20.0" "30.0" "60000" "1000" 5060
+[[ "${WEBHOOK_CALL_COUNT}" -eq 4 ]] || { echo "  [FAIL] 网络连续 2 次超限应触发 Webhook (当前次数: ${WEBHOOK_CALL_COUNT})"; exit 1; }
+echo "  [PASS] 网络入站流量超限告警触发测试通过"
+
 echo "=== [TEST] lib/alert.sh 所有测试通过! ==="
