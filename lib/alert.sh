@@ -466,6 +466,34 @@ EOF
     _format_alert_line "网络入站(RX)" "${rx_mb}" " MB/s" "${net_rx_thresh}" "${net_consecutive}" "NET_RX"
     _format_alert_line "网络出站(TX)" "${tx_mb}" " MB/s" "${net_tx_thresh}" "${net_consecutive}" "NET_TX"
 
+    local srv_checks
+    srv_checks=$(ops_config_get "SERVICE_HEALTH_CHECKS" "")
+    if [[ -n "${srv_checks}" ]]; then
+        cat <<EOF
+│
+│${COLOR_BOLD}  --- 业务服务健康探活与自愈 (Service Health) ---${COLOR_RESET}
+EOF
+        local sanitized_checks
+        sanitized_checks=$(echo "${srv_checks}" | tr ';' '\n')
+        while IFS= read -r item || [[ -n "${item}" ]]; do
+            item=$(echo "${item}" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
+            [[ -z "${item}" || "${item}" =~ ^# ]] && continue
+            IFS='|' read -r s_name s_url s_cmd _ <<< "${item}"
+            [[ -z "${s_name}" || -z "${s_url}" ]] && continue
+            local s_key
+            s_key=$(echo "${s_name}" | tr -cd 'A-Za-z0-9_')
+            local s_st="${OPS_SERVICE_STATE[${s_key}_STATE]:-NORMAL}"
+            local s_code="${OPS_SERVICE_STATE[${s_key}_LAST_HTTP_CODE]:-200}"
+            local s_badge="${COLOR_GREEN}🟢 正常${COLOR_RESET}"
+            if [[ "${s_st}" == "COOLDOWN" || "${s_st}" == "ALERTED" ]]; then
+                s_badge="${COLOR_RED}🔴 故障自愈中${COLOR_RESET}"
+            elif [[ "${s_st}" == "SUSPECTED" ]]; then
+                s_badge="${COLOR_YELLOW}🟡 怀疑中${COLOR_RESET}"
+            fi
+            printf "│  [•] %-14s : %-25s HTTP: %-4s 状态: %b\n" "${s_name}" "${s_url}" "${s_code}" "${s_badge}"
+        done <<< "${sanitized_checks}"
+    fi
+
     cat <<EOF
 │
 │${COLOR_BOLD}  --- 通知推送渠道 (Webhook) ---${COLOR_RESET}

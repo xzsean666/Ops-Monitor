@@ -37,6 +37,8 @@ source "${_OPS_ROOT}/lib/render.sh"
 source "${_OPS_ROOT}/lib/node_mgr.sh"
 # shellcheck source=lib/docker.sh
 source "${_OPS_ROOT}/lib/docker.sh"
+# shellcheck source=lib/service_health.sh
+source "${_OPS_ROOT}/lib/service_health.sh"
 unset _OPS_ROOT
 
 # ------------------------------------------------------------------------------
@@ -55,6 +57,9 @@ ${COLOR_BOLD}本地监控与可视化:${COLOR_RESET}
   ${COLOR_CYAN}ops status${COLOR_RESET}                  输出紧凑的单次健康体检报告 (适合 MOTD / 远程探测)
   ${COLOR_CYAN}ops history <cpu|mem|disk|net>${COLOR_RESET}
                               以高精度 ASCII 坐标系绘制过去 24 小时的历史指标大图
+
+${COLOR_BOLD}业务服务健康探测与自愈 (Service Health):${COLOR_RESET}
+  ${COLOR_CYAN}ops health${COLOR_RESET}, ${COLOR_CYAN}ops service${COLOR_RESET}           [推荐] 实时探测所有配置的 HTTP 服务健康状态与自愈动作
 
 ${COLOR_BOLD}Docker 容器实时资源监控 (Docker Stats):${COLOR_RESET}
   ${COLOR_CYAN}ops docker${COLOR_RESET}, ${COLOR_CYAN}ops ps${COLOR_RESET}            [推荐] 实时查看所有 Docker 容器的 CPU、内存、I/O 等资源占用快照
@@ -301,10 +306,13 @@ ops_daemon_loop() {
             ops_alert_evaluate_all "${cpu}" "${mem}" "${disk}" "${rx}" "${tx}" "${ts}"
         fi
 
-        # 3. 每日历史归档检查
+        # 3. 业务服务健康探活与自愈评估
+        ops_service_health_evaluate_all
+
+        # 4. 每日历史归档检查
         ops_storage_archive 0
 
-        # 4. 休眠至下一周期 (支持信号唤醒中断)
+        # 5. 休眠至下一周期 (支持信号唤醒中断)
         sleep "${interval}" &
         wait $! 2>/dev/null || true
     done
@@ -320,6 +328,7 @@ ops_cron_step() {
         IFS=$'\t' read -r ts cpu mem disk rx tx <<< "${raw_tsv}"
         ops_alert_evaluate_all "${cpu}" "${mem}" "${disk}" "${rx}" "${tx}" "${ts}"
     fi
+    ops_service_health_evaluate_all
     ops_storage_archive 0
 }
 
@@ -470,6 +479,9 @@ main() {
             else
                 ops_alert_cli "$@"
             fi
+            ;;
+        health|service|services|probe)
+            ops_service_health_cli "$@"
             ;;
         switch|select|s)
             ops_node_switch

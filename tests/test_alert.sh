@@ -24,6 +24,9 @@ echo "  [PASS] lib/alert.sh bash -n 语法检查通过"
 # 2. 隔离环境变量与 Mock Webhook
 export OPS_BASE_DIR="${BASE_DIR}"
 export OPS_ALERT_STATE_FILE="${TMP_DIR}/state/alert.state"
+mkdir -p "${TMP_DIR}/config"
+cp "${BASE_DIR}/config/ops.conf.default" "${TMP_DIR}/config/ops.conf"
+export OPS_CONFIG_FILE="${TMP_DIR}/config/ops.conf"
 
 # shellcheck source=../lib/alert.sh
 source "${BASE_DIR}/lib/alert.sh"

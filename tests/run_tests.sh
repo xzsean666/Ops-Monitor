@@ -42,6 +42,7 @@ TEST_FILES=(
     "test_packaging.sh"
     "test_daemon_prompt.sh"
     "test_node_mgr.sh"
+    "test_service_health.sh"
 )
 
 TOTAL_COUNT=${#TEST_FILES[@]}

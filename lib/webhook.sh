@@ -367,6 +367,216 @@ ops_webhook_broadcast() {
 }
 
 # ------------------------------------------------------------------------------
+# 业务服务健康探测 Webhook 适配与多通道广播
+# ------------------------------------------------------------------------------
+ops_webhook_send_service_slack() {
+    local service_name="$1"
+    local probe_url="$2"
+    local http_code="$3"
+    local detail_msg="${4:-}"
+    local is_recovered="${5:-0}"
+    local restart_cmd="${6:-}"
+
+    local url
+    url=$(ops_config_get "WEBHOOK_SLACK_URL" "")
+    [[ -z "${url}" ]] && return 0
+
+    local host ip_addr
+    host=$(_ops_get_hostname)
+    ip_addr=$(_ops_get_host_ip)
+
+    local color title
+    if [[ "${is_recovered}" == "1" ]]; then
+        color="#2eb886"
+        title="✅ [Ops-Monitor 恢复] 业务服务已恢复健康"
+    else
+        color="#e01e5a"
+        title="🚨 [Ops-Monitor 告警] 业务服务健康探测异常与自愈"
+    fi
+
+    local timestamp_str
+    timestamp_str="$(date '+%Y-%m-%d %H:%M:%S')"
+
+    local restart_display="未配置"
+    [[ -n "${restart_cmd}" ]] && restart_display="\`${restart_cmd}\`"
+
+    local payload
+    payload=$(cat <<EOF
+{
+  "attachments": [
+    {
+      "color": "${color}",
+      "title": "${title}",
+      "fields": [
+        {"title": "主机节点", "value": "${host}", "short": true},
+        {"title": "IP 地址", "value": "${ip_addr}", "short": true},
+        {"title": "服务名称", "value": "${service_name}", "short": true},
+        {"title": "HTTP 状态", "value": "${http_code}", "short": true},
+        {"title": "探测地址", "value": "${probe_url}", "short": false},
+        {"title": "自愈动作", "value": "${restart_display}", "short": true},
+        {"title": "发生时间", "value": "${timestamp_str}", "short": true},
+        {"title": "诊断详情", "value": "${detail_msg}", "short": false}
+      ],
+      "footer": "Ops-Monitor Service Health Agent"
+    }
+  ]
+}
+EOF
+)
+    _ops_http_post "${url}" "${payload}"
+}
+
+ops_webhook_send_service_dingtalk() {
+    local service_name="$1"
+    local probe_url="$2"
+    local http_code="$3"
+    local detail_msg="${4:-}"
+    local is_recovered="${5:-0}"
+    local restart_cmd="${6:-}"
+
+    local url
+    url=$(ops_config_get "WEBHOOK_DINGTALK_URL" "")
+    local secret
+    secret=$(ops_config_get "WEBHOOK_DINGTALK_SECRET" "")
+    [[ -z "${url}" ]] && return 0
+
+    local final_url
+    final_url=$(ops_webhook_sign_dingtalk "${url}" "${secret}")
+    local host ip_addr
+    host=$(_ops_get_hostname)
+    ip_addr=$(_ops_get_host_ip)
+
+    local title text timestamp_str
+    timestamp_str="$(date '+%Y-%m-%d %H:%M:%S')"
+
+    if [[ "${is_recovered}" == "1" ]]; then
+        title="✅ [Ops-Monitor 恢复] 业务服务已恢复正常"
+        text="### ✅ [Ops-Monitor 恢复] 业务服务已恢复正常\n- **主机节点**: ${host}\n- **IP 地址**: ${ip_addr}\n- **服务名称**: ${service_name}\n- **探测地址**: ${probe_url}\n- **HTTP 状态**: <font color=\"#34a853\">${http_code}</font>\n- **诊断详情**: ${detail_msg}\n- **恢复时间**: ${timestamp_str}\n"
+    else
+        title="🚨 [Ops-Monitor 告警] 业务服务健康探测异常与自愈"
+        local restart_desc="无自愈动作"
+        [[ -n "${restart_cmd}" ]] && restart_desc="执行: \`${restart_cmd}\`"
+        text="### 🚨 [Ops-Monitor 告警] 业务服务健康探测异常\n- **主机节点**: ${host}\n- **IP 地址**: ${ip_addr}\n- **服务名称**: ${service_name}\n- **探测地址**: ${probe_url}\n- **HTTP 状态**: <font color=\"#d93025\">${http_code}</font>\n- **自愈机制**: ${restart_desc}\n- **诊断详情**: ${detail_msg}\n- **告警时间**: ${timestamp_str}\n"
+    fi
+
+    local payload
+    payload=$(cat <<EOF
+{
+  "msgtype": "markdown",
+  "markdown": {
+    "title": "${title}",
+    "text": "${text}"
+  }
+}
+EOF
+)
+    _ops_http_post "${final_url}" "${payload}"
+}
+
+ops_webhook_send_service_feishu() {
+    local service_name="$1"
+    local probe_url="$2"
+    local http_code="$3"
+    local detail_msg="${4:-}"
+    local is_recovered="${5:-0}"
+    local restart_cmd="${6:-}"
+
+    local url
+    url=$(ops_config_get "WEBHOOK_FEISHU_URL" "")
+    [[ -z "${url}" ]] && return 0
+
+    local host ip_addr
+    host=$(_ops_get_hostname)
+    ip_addr=$(_ops_get_host_ip)
+
+    local template title timestamp_str
+    timestamp_str="$(date '+%Y-%m-%d %H:%M:%S')"
+
+    if [[ "${is_recovered}" == "1" ]]; then
+        template="green"
+        title="✅ [Ops-Monitor 恢复] 业务服务已恢复健康"
+    else
+        template="red"
+        title="🚨 [Ops-Monitor 告警] 业务服务健康探测异常与自愈"
+    fi
+
+    local restart_desc="未配置"
+    [[ -n "${restart_cmd}" ]] && restart_desc="${restart_cmd}"
+
+    local payload
+    payload=$(cat <<EOF
+{
+  "msg_type": "interactive",
+  "card": {
+    "header": {
+      "title": {"tag": "plain_text", "content": "${title}"},
+      "template": "${template}"
+    },
+    "elements": [
+      {
+        "tag": "div",
+        "text": {
+          "tag": "lark_md",
+          "content": "**主机节点**: ${host}\n**IP 地址**: ${ip_addr}\n**服务名称**: ${service_name}\n**HTTP 状态**: ${http_code}\n**探测地址**: ${probe_url}\n**自愈动作**: ${restart_desc}\n**发生时间**: ${timestamp_str}\n**诊断信息**: ${detail_msg}"
+        }
+      }
+    ]
+  }
+}
+EOF
+)
+    _ops_http_post "${url}" "${payload}"
+}
+
+ops_webhook_send_service_wecom() {
+    local service_name="$1"
+    local probe_url="$2"
+    local http_code="$3"
+    local detail_msg="${4:-}"
+    local is_recovered="${5:-0}"
+    local restart_cmd="${6:-}"
+
+    local url
+    url=$(ops_config_get "WEBHOOK_WECOM_URL" "")
+    [[ -z "${url}" ]] && return 0
+
+    local host ip_addr
+    host=$(_ops_get_hostname)
+    ip_addr=$(_ops_get_host_ip)
+
+    local timestamp_str text
+    timestamp_str="$(date '+%Y-%m-%d %H:%M:%S')"
+
+    if [[ "${is_recovered}" == "1" ]]; then
+        text="### ✅ [Ops-Monitor 恢复] 业务服务已恢复健康\n> **主机节点**: <font color=\"comment\">${host}</font>\n> **IP 地址**: <font color=\"comment\">${ip_addr}</font>\n> **服务名称**: <font color=\"info\">${service_name}</font>\n> **HTTP 状态**: <font color=\"info\">${http_code}</font>\n> **探测地址**: ${probe_url}\n> **诊断详情**: ${detail_msg}\n> **恢复时间**: ${timestamp_str}"
+    else
+        local restart_desc="未配置"
+        [[ -n "${restart_cmd}" ]] && restart_desc="\`${restart_cmd}\`"
+        text="### 🚨 [Ops-Monitor 告警] 业务服务健康探测异常与自愈\n> **主机节点**: <font color=\"comment\">${host}</font>\n> **IP 地址**: <font color=\"comment\">${ip_addr}</font>\n> **服务名称**: <font color=\"warning\">${service_name}</font>\n> **HTTP 状态**: <font color=\"warning\">${http_code}</font>\n> **探测地址**: ${probe_url}\n> **自愈动作**: ${restart_desc}\n> **诊断详情**: ${detail_msg}\n> **发生时间**: ${timestamp_str}"
+    fi
+
+    local payload
+    payload=$(cat <<EOF
+{
+  "msgtype": "markdown",
+  "markdown": {
+    "content": "${text}"
+  }
+}
+EOF
+)
+    _ops_http_post "${url}" "${payload}"
+}
+
+ops_webhook_broadcast_service() {
+    ops_webhook_send_service_slack "$@" || true
+    ops_webhook_send_service_dingtalk "$@" || true
+    ops_webhook_send_service_feishu "$@" || true
+    ops_webhook_send_service_wecom "$@" || true
+    return 0
+}
+
+# ------------------------------------------------------------------------------
 # 连通性测试命令 (ops config test-alert)
 # ------------------------------------------------------------------------------
 ops_webhook_test_alert() {

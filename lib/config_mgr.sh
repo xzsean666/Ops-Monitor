@@ -33,6 +33,10 @@ OPS_VALID_CONFIG_KEYS=(
     "WEBHOOK_DINGTALK_SECRET"
     "WEBHOOK_FEISHU_URL"
     "WEBHOOK_WECOM_URL"
+    "SERVICE_HEALTH_CHECKS"
+    "SERVICE_HEALTH_CONSECUTIVE"
+    "SERVICE_HEALTH_COOLDOWN_MINUTES"
+    "SERVICE_HEALTH_TIMEOUT_SECONDS"
 )
 
 # ------------------------------------------------------------------------------
@@ -126,6 +130,18 @@ ops_config_validate_val() {
         WEBHOOK_DINGTALK_SECRET)
             if [[ -n "${val}" ]] && [[ "${val}" =~ [\"\'\`\$\;\|\<\>] ]]; then
                 ops_log_err "WEBHOOK_DINGTALK_SECRET 包含非法字符"
+                return 1
+            fi
+            ;;
+        SERVICE_HEALTH_CONSECUTIVE|SERVICE_HEALTH_COOLDOWN_MINUTES|SERVICE_HEALTH_TIMEOUT_SECONDS)
+            if ! [[ "${val}" =~ ^[0-9]+$ ]] || [[ "${val}" -lt 1 ]]; then
+                ops_log_err "${key} 必须为大于等于 1 的正整数 (当前: '${val}')"
+                return 1
+            fi
+            ;;
+        SERVICE_HEALTH_CHECKS)
+            if [[ -n "${val}" ]] && [[ "${val}" =~ [\`\$\&\<\>] ]]; then
+                ops_log_err "SERVICE_HEALTH_CHECKS 包含非法特殊字符: '${val}'"
                 return 1
             fi
             ;;

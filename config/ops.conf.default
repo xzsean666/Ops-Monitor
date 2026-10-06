@@ -24,3 +24,13 @@ WEBHOOK_DINGTALK_URL=""
 WEBHOOK_DINGTALK_SECRET=""
 WEBHOOK_FEISHU_URL=""
 WEBHOOK_WECOM_URL=""
+
+# --- 业务服务健康探测与自愈 (Service Health & Self-Healing) ---
+# 格式: 服务名|探活URL|重启自愈命令(可选)|连续失败次数(可选)|冷却分钟(可选)|超时秒(可选)
+# 多个服务使用分号 ; 或换行分隔
+# 示例: SERVICE_HEALTH_CHECKS="AstarFi-Backend|http://127.0.0.1:10101/health|docker restart astar-fi-backend-v2-stag"
+SERVICE_HEALTH_CHECKS=""
+SERVICE_HEALTH_CONSECUTIVE=2             # 默认连续探测失败触发次数 (防抖)
+SERVICE_HEALTH_COOLDOWN_MINUTES=10       # 默认自愈与告警抑制冷却时长 (分钟)
+SERVICE_HEALTH_TIMEOUT_SECONDS=5         # 默认 HTTP 探活请求超时 (秒)
+
