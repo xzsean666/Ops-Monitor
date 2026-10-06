@@ -34,3 +34,6 @@ SERVICE_HEALTH_CONSECUTIVE=2             # 默认连续探测失败触发次数 
 SERVICE_HEALTH_COOLDOWN_MINUTES=10       # 默认自愈与告警抑制冷却时长 (分钟)
 SERVICE_HEALTH_TIMEOUT_SECONDS=5         # 默认 HTTP 探活请求超时 (秒)
 
+# --- 容器资源与内存告警 (防 V8 堆内存 OOM 盲区) ---
+ALERT_CONTAINER_MEM_THRESHOLD=80          # 容器内存使用率告警阈值 (%)
+

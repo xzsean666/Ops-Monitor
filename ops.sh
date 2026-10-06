@@ -290,6 +290,9 @@ ops_daemon_loop() {
     trap 'running=0; ops_log_info "收到终止信号，ops-daemon 正在退出..."; exit 0' INT TERM
 
     while [[ "${running}" -eq 1 ]]; do
+        # 动态热加载最新配置 (支持无需重启进程即刻生效)
+        ops_config_load
+
         local interval
         interval=$(ops_config_get "COLLECT_INTERVAL" "60")
         [[ "${interval}" -lt 1 ]] && interval=60

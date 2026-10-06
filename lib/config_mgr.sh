@@ -37,6 +37,7 @@ OPS_VALID_CONFIG_KEYS=(
     "SERVICE_HEALTH_CONSECUTIVE"
     "SERVICE_HEALTH_COOLDOWN_MINUTES"
     "SERVICE_HEALTH_TIMEOUT_SECONDS"
+    "ALERT_CONTAINER_MEM_THRESHOLD"
 )
 
 # ------------------------------------------------------------------------------
@@ -85,7 +86,7 @@ ops_config_validate_val() {
                 fi
             fi
             ;;
-        ALERT_CPU_THRESHOLD|ALERT_MEM_THRESHOLD|ALERT_DISK_THRESHOLD)
+        ALERT_CPU_THRESHOLD|ALERT_MEM_THRESHOLD|ALERT_DISK_THRESHOLD|ALERT_CONTAINER_MEM_THRESHOLD)
             if ! [[ "${val}" =~ ^[0-9]+$ ]] || [[ "${val}" -lt 1 ]] || [[ "${val}" -gt 100 ]]; then
                 ops_log_err "${key} 必须在 1 到 100 之间 (当前: '${val}')"
                 return 1

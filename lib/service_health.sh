@@ -108,6 +108,32 @@ ops_service_health_check_one() {
             err_detail="连接超时或端口未监听 (Connection Refused / Timeout)"
         fi
 
+        # 检查关联的 Docker 容器退出/状态 (若配置了 docker restart/start 命令)
+        local container_name=""
+        if [[ "${restart_cmd}" =~ docker[[:space:]]+(restart|start)[[:space:]]+([A-Za-z0-9_-]+) ]]; then
+            container_name="${BASH_REMATCH[2]}"
+        fi
+
+        if [[ -n "${container_name}" ]] && command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
+            local c_inspect
+            c_inspect=$(docker inspect -f '{{.State.Status}}|{{.State.ExitCode}}|{{.State.OOMKilled}}' "${container_name}" 2>/dev/null || echo "")
+            if [[ -n "${c_inspect}" ]]; then
+                local c_status="" c_exit_code="" c_oom=""
+                IFS='|' read -r c_status c_exit_code c_oom <<< "${c_inspect}"
+                if [[ "${c_status}" == "exited" || "${c_status}" == "dead" || "${c_status}" == "restarting" ]]; then
+                    if [[ "${c_oom}" == "true" ]]; then
+                        err_detail="容器内存耗尽崩溃终止 (OOMKilled, 退出码: ${c_exit_code})"
+                    elif [[ "${c_status}" == "restarting" ]]; then
+                        err_detail="容器处于崩溃重启循环中 (Docker: restarting, 退出码: ${c_exit_code})"
+                    else
+                        err_detail="容器主进程已异常退出终止 (Docker: exited, 退出码: ${c_exit_code})"
+                    fi
+                    # 容器已明确异常终止，立即告警与自愈，无需等待防抖
+                    consecutive_req=1
+                fi
+            fi
+        fi
+
         if [[ "${current_state}" == "COOLDOWN" ]]; then
             local cooldown_sec=$(( cooldown_min * 60 ))
             local elapsed=$(( now_ts - last_alert_time ))
@@ -206,7 +232,61 @@ ops_service_health_evaluate_all() {
         ops_service_health_check_one "${s_name}" "${s_url}" "${s_cmd}" "${req}" "${cd}" "${to}"
     done <<< "${sanitized_checks}"
 
+    # 容器内存指标监测与防 OOM 预警
+    ops_service_container_memory_evaluate
+
     _ops_service_save_state
+}
+
+# ------------------------------------------------------------------------------
+# 容器内存指标监控与告警 (防 V8 堆内存 / 容器 OOM 盲区)
+# ------------------------------------------------------------------------------
+ops_service_container_memory_evaluate() {
+    local threshold
+    threshold=$(ops_config_get "ALERT_CONTAINER_MEM_THRESHOLD" "80")
+    [[ -z "${threshold}" || "${threshold}" -le 0 ]] && return 0
+
+    command -v docker >/dev/null 2>&1 || return 0
+    docker info >/dev/null 2>&1 || return 0
+
+    local stats_raw
+    stats_raw=$(docker stats --no-stream --format "{{.Name}}\t{{.MemPerc}}\t{{.MemUsage}}" 2>/dev/null || echo "")
+    [[ -z "${stats_raw}" ]] && return 0
+
+    while IFS=$'\t' read -r c_name c_mem_perc c_mem_usage || [[ -n "${c_name}" ]]; do
+        [[ -z "${c_name}" || -z "${c_mem_perc}" ]] && continue
+
+        local clean_perc
+        clean_perc=$(echo "${c_mem_perc}" | tr -cd '0-9.')
+        [[ -z "${clean_perc}" ]] && continue
+
+        local is_high
+        is_high=$(awk -v val="${clean_perc}" -v th="${threshold}" 'BEGIN { print (val >= th) ? 1 : 0 }')
+
+        local s_key
+        s_key="CMEM_$(_ops_service_sanitize_key "${c_name}")"
+        local state_key="${s_key}_STATE"
+        local last_alert_key="${s_key}_LAST_ALERT"
+        local cur_state="${OPS_SERVICE_STATE[${state_key}]:-NORMAL}"
+        local last_alert_ts="${OPS_SERVICE_STATE[${last_alert_key}]:-0}"
+        local now_ts
+        now_ts="$(date +%s)"
+
+        if [[ "${is_high}" -eq 1 ]]; then
+            if [[ "${cur_state}" != "ALERTED" || $(( now_ts - last_alert_ts )) -ge 1800 ]]; then
+                ops_log_warn "[容器内存告警] 容器 ${c_name} 内存占用达 ${c_mem_perc} (>= 阈值 ${threshold}%)，当前用量: ${c_mem_usage}"
+                ops_webhook_broadcast_service "${c_name}" "Docker Container Memory" "${c_mem_perc}" "容器内存占比达 ${c_mem_perc} (当前用量: ${c_mem_usage}, 预警阈值: ${threshold}%)，存在 OOM 崩溃风险，请及时排查！" 0 ""
+                OPS_SERVICE_STATE["${state_key}"]="ALERTED"
+                OPS_SERVICE_STATE["${last_alert_key}"]="${now_ts}"
+            fi
+        else
+            if [[ "${cur_state}" == "ALERTED" ]]; then
+                ops_log_info "[容器内存恢复] 容器 ${c_name} 内存已回落至安全水位 (${c_mem_perc} < ${threshold}%)"
+                ops_webhook_broadcast_service "${c_name}" "Docker Container Memory" "${c_mem_perc}" "容器内存已恢复至安全水位 (${c_mem_perc} < ${threshold}%, 当前用量: ${c_mem_usage})" 1 ""
+                OPS_SERVICE_STATE["${state_key}"]="NORMAL"
+            fi
+        fi
+    done <<< "${stats_raw}"
 }
 
 # ------------------------------------------------------------------------------
